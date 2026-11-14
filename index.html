@@ -2166,6 +2166,328 @@ if('serviceWorker' in navigator){
  });
 }
 </script>
+<!-- =====================================
+     FIREBASE NOTIFICATION SUBSCRIPTION
+===================================== -->
 
+<style>
+#firebaseNotificationCard {
+  background: linear-gradient(145deg,#102b25,#0b1c24);
+  border: 1px solid #35ffad;
+  border-radius: 14px;
+  padding: 17px;
+  margin: 18px 0;
+  color: #fff;
+  box-shadow: 0 0 16px rgba(53,255,173,.10);
+}
+
+#firebaseNotificationCard h3 {
+  margin: 0 0 8px;
+  color: #65ffc0;
+  font-size: 16px;
+}
+
+#firebaseNotificationCard p {
+  color: #c5d6d0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.firebase-notification-btn {
+  width: 100%;
+  padding: 13px;
+  margin-top: 8px;
+  border: none;
+  border-radius: 9px;
+  background: #35ffad;
+  color: #071426;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.firebase-notification-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+#firebaseNotificationStatus {
+  font-size: 12px;
+  margin-top: 10px;
+  color: #65ffc0;
+}
+</style>
+
+<div id="firebaseNotificationCard" style="display:none;">
+  <h3>🔔 APP UPDATE NOTIFICATIONS</h3>
+
+  <p>
+    Enable notifications to receive important GENERAL FOOTBALL
+    TIPS updates and announcements.
+  </p>
+
+  <button
+    id="enableFirebaseNotifications"
+    class="firebase-notification-btn">
+    ENABLE NOTIFICATIONS
+  </button>
+
+  <button
+    id="disableFirebaseNotifications"
+    class="firebase-notification-btn"
+    style="background:#263d38;color:#fff;display:none;">
+    DISABLE NOTIFICATIONS
+  </button>
+
+  <div id="firebaseNotificationStatus">
+    Notifications are currently disabled.
+  </div>
+</div>
+
+<script type="module">
+
+import { initializeApp }
+from "https://www.gstatic.com/firebasejs/13.3.0/firebase-app.js";
+
+import {
+  getMessaging,
+  getToken,
+  deleteToken,
+  onMessage
+}
+from "https://www.gstatic.com/firebasejs/13.3.0/firebase-messaging.js";
+
+/* FIREBASE CONFIGURATION */
+
+const firebaseConfig = {
+  apiKey: "AIzaSyC29k6H32V4smIJmQbaJpmT8s-9gFJ9M",
+  authDomain: "general-football-tips.firebaseapp.com",
+  projectId: "general-football-tips",
+  storageBucket: "general-football-tips.firebasestorage.app",
+  messagingSenderId: "710183231768",
+  appId: "1:710183231768:web:60c490825c687fb9c57e6d"
+};
+
+/* PUBLIC VAPID KEY */
+
+const VAPID_KEY =
+"BE8KtKW0GouXQdfHR-WYvL7xmvG-zgTYd4nK7ktx_IHEHSHfQky9p5wNd0ljAAS8jzor_pZMTBWZT5qkqcUU0rE";
+
+/* INITIALIZE FIREBASE */
+
+const firebaseApp = initializeApp(firebaseConfig);
+const messaging = getMessaging(firebaseApp);
+
+const TOKEN_STORAGE_KEY = "gtp_firebase_token";
+
+const card = document.getElementById(
+  "firebaseNotificationCard"
+);
+
+const enableButton = document.getElementById(
+  "enableFirebaseNotifications"
+);
+
+const disableButton = document.getElementById(
+  "disableFirebaseNotifications"
+);
+
+const statusText = document.getElementById(
+  "firebaseNotificationStatus"
+);
+
+function showStatus(message) {
+  statusText.textContent = message;
+}
+
+function updateButtons(enabled) {
+  enableButton.style.display = enabled ? "none" : "block";
+  disableButton.style.display = enabled ? "block" : "none";
+}
+
+/* SHOW NOTIFICATION CARD ON HOMEPAGE */
+
+const homePage = document.getElementById("home");
+
+if (homePage) {
+  card.style.display = "block";
+
+  const homeHeader = homePage.querySelector("header");
+
+  if (homeHeader) {
+    homeHeader.insertAdjacentElement("afterend", card);
+  } else {
+    homePage.prepend(card);
+  }
+}
+
+/* SERVICE WORKER */
+
+async function getServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    throw new Error("Service workers are not supported.");
+  }
+
+  return await navigator.serviceWorker.register("/sw.js");
+}
+
+/* SAVE SUBSCRIPTION ON SERVER */
+
+async function saveSubscription(token) {
+  const response = await fetch(
+    "/api/notifications/subscribe",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ token })
+    }
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      result.error || "Unable to save subscription."
+    );
+  }
+
+  localStorage.setItem(TOKEN_STORAGE_KEY, token);
+
+  return result;
+}
+
+/* ENABLE NOTIFICATIONS */
+
+enableButton.addEventListener("click", async () => {
+  enableButton.disabled = true;
+
+  try {
+    if (!("Notification" in window)) {
+      throw new Error(
+        "Your browser does not support notifications."
+      );
+    }
+
+    showStatus("Requesting notification permission...");
+
+    const permission =
+      await Notification.requestPermission();
+
+    if (permission !== "granted") {
+      throw new Error(
+        "Notification permission was not granted."
+      );
+    }
+
+    showStatus("Connecting to Firebase...");
+
+    const registration = await getServiceWorker();
+
+    const token = await getToken(messaging, {
+      vapidKey: VAPID_KEY,
+      serviceWorkerRegistration: registration
+    });
+
+    if (!token) {
+      throw new Error(
+        "Firebase could not generate a device token."
+      );
+    }
+
+    showStatus("Saving your subscription...");
+
+    await saveSubscription(token);
+
+    updateButtons(true);
+
+    showStatus(
+      "Notifications enabled successfully!"
+    );
+
+  } catch (error) {
+    console.error("Firebase subscription error:", error);
+
+    showStatus(error.message);
+
+  } finally {
+    enableButton.disabled = false;
+  }
+});
+
+/* DISABLE NOTIFICATIONS */
+
+disableButton.addEventListener("click", async () => {
+  disableButton.disabled = true;
+
+  try {
+    const token = localStorage.getItem(
+      TOKEN_STORAGE_KEY
+    );
+
+    if (token) {
+      const response = await fetch(
+        "/api/notifications/unsubscribe",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ token })
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          "Unable to remove server subscription."
+        );
+      }
+    }
+
+    await deleteToken(messaging);
+
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+
+    updateButtons(false);
+
+    showStatus("Notifications disabled.");
+
+  } catch (error) {
+    console.error("Unsubscribe error:", error);
+
+    showStatus(error.message);
+
+  } finally {
+    disableButton.disabled = false;
+  }
+});
+
+/* RESTORE SUBSCRIPTION DISPLAY */
+
+if (
+  localStorage.getItem(TOKEN_STORAGE_KEY) &&
+  Notification.permission === "granted"
+) {
+  updateButtons(true);
+  showStatus("Notifications are enabled on this device.");
+}
+
+/* FOREGROUND NOTIFICATIONS */
+
+onMessage(messaging, payload => {
+  console.log("Firebase foreground message:", payload);
+
+  const title =
+    payload.notification?.title ||
+    "GENERAL FOOTBALL TIPS";
+
+  const body =
+    payload.notification?.body ||
+    "A new update is available.";
+
+  showStatus(title + ": " + body);
+});
+
+</script>is 
 </body>
 </html>
