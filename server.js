@@ -2,6 +2,9 @@
 
 const express = require("express");
 const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
+const admin = require("firebase-admin");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -10,9 +13,131 @@ const API_TOKEN = process.env.FOOTBALL_DATA_TOKEN;
 const API_BASE = "https://api.football-data.org/v4";
 const TIME_ZONE = "Africa/Lagos";
 
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+
 app.disable("x-powered-by");
 app.use(express.json({ limit: "100kb" }));
 app.use(express.static(__dirname));
+
+/* =====================================
+   FIREBASE ADMIN CONNECTION
+===================================== */
+
+let firebaseReady = false;
+let db = null;
+let messaging = null;
+
+try {
+  const serviceAccountPath =
+    "/etc/secrets/firebase-service-account.json";
+
+  const serviceAccount = JSON.parse(
+    fs.readFileSync(serviceAccountPath, "utf8")
+  );
+
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+
+  db = admin.firestore();
+  messaging = admin.messaging();
+
+  firebaseReady = true;
+
+  console.log("Firebase notification system connected.");
+
+} catch (error) {
+  console.error(
+    "Firebase initialization failed:",
+    error.message
+  );
+}
+
+/* =====================================
+   ADMIN AUTHENTICATION
+===================================== */
+
+const adminSessions = new Map();
+
+const ADMIN_SESSION_DURATION =
+  8 * 60 * 60 * 1000;
+
+function safeCompare(first, second) {
+  const a = Buffer.from(String(first || ""));
+  const b = Buffer.from(String(second || ""));
+
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(a, b);
+}
+
+function createAdminSession() {
+  const token = crypto.randomBytes(48).toString("hex");
+
+  adminSessions.set(token, {
+    expiresAt: Date.now() + ADMIN_SESSION_DURATION
+  });
+
+  return token;
+}
+
+function requireAdmin(req, res, next) {
+  const authorization = req.headers.authorization || "";
+
+  const token = authorization.startsWith("Bearer ")
+    ? authorization.slice(7)
+    : "";
+
+  const session = adminSessions.get(token);
+
+  if (!session || Date.now() > session.expiresAt) {
+    if (token) {
+      adminSessions.delete(token);
+    }
+
+    return res.status(401).json({
+      error: "Administrator authentication required."
+    });
+  }
+
+  next();
+}
+
+/* =====================================
+   NOTIFICATION HELPERS
+===================================== */
+
+function hashToken(token) {
+  return crypto
+    .createHash("sha256")
+    .update(token)
+    .digest("hex");
+}
+
+function notificationErrorIsInvalidToken(error) {
+  const invalidCodes = [
+    "messaging/registration-token-not-registered",
+    "messaging/invalid-registration-token"
+  ];
+
+  return invalidCodes.includes(error?.code);
+}
+
+function cleanNotificationText(value, maxLength) {
+  return String(value || "")
+    .trim()
+    .slice(0, maxLength);
+}
+
+async function getSubscriberCount() {
+  const snapshot = await db
+    .collection("notificationSubscribers")
+    .get();
+
+  return snapshot.size;
+}
 
 /* =====================================
    CACHE STORAGE
@@ -702,6 +827,422 @@ async function buildMatchAnalysis(matchId, priorityState) {
 }
 
 /* =====================================
+   FIREBASE SUBSCRIPTION ROUTES
+===================================== */
+
+app.post("/api/notifications/subscribe", async (req, res) => {
+  if (!firebaseReady) {
+    return res.status(503).json({
+      error: "Notification service is unavailable."
+    });
+  }
+
+  const token = cleanNotificationText(req.body.token, 4096);
+
+  if (!token || token.length < 20) {
+    return res.status(400).json({
+      error: "A valid notification token is required."
+    });
+  }
+
+  try {
+    const id = hashToken(token);
+
+    await db
+      .collection("notificationSubscribers")
+      .doc(id)
+      .set({
+        token,
+        active: true,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+    res.json({
+      ok: true,
+      message: "Notification subscription saved."
+    });
+
+  } catch (error) {
+    console.error("Subscription error:", error.message);
+
+    res.status(500).json({
+      error: "Unable to save notification subscription."
+    });
+  }
+});
+
+app.post("/api/notifications/unsubscribe", async (req, res) => {
+  if (!firebaseReady) {
+    return res.status(503).json({
+      error: "Notification service is unavailable."
+    });
+  }
+
+  const token = cleanNotificationText(req.body.token, 4096);
+
+  if (!token) {
+    return res.status(400).json({
+      error: "Notification token is required."
+    });
+  }
+
+  try {
+    await db
+      .collection("notificationSubscribers")
+      .doc(hashToken(token))
+      .delete();
+
+    res.json({
+      ok: true,
+      message: "Notification subscription removed."
+    });
+
+  } catch (error) {
+    console.error("Unsubscribe error:", error.message);
+
+    res.status(500).json({
+      error: "Unable to remove subscription."
+    });
+  }
+});
+
+/* =====================================
+   ADMIN LOGIN
+===================================== */
+
+app.post("/api/admin/login", (req, res) => {
+  if (!ADMIN_PASSWORD) {
+    return res.status(503).json({
+      error: "ADMIN_PASSWORD is not configured."
+    });
+  }
+
+  const password = req.body.password;
+
+  if (!safeCompare(password, ADMIN_PASSWORD)) {
+    return res.status(401).json({
+      error: "Incorrect administrator password."
+    });
+  }
+
+  const token = createAdminSession();
+
+  res.json({
+    ok: true,
+    token,
+    expiresIn: ADMIN_SESSION_DURATION
+  });
+});
+
+/* =====================================
+   ADMIN DASHBOARD DATA
+===================================== */
+
+app.get(
+  "/api/admin/status",
+  requireAdmin,
+  async (req, res) => {
+    if (!firebaseReady) {
+      return res.status(503).json({
+        error: "Firebase is unavailable."
+      });
+    }
+
+    try {
+      const subscriberSnapshot = await db
+        .collection("notificationSubscribers")
+        .get();
+
+      const campaignsSnapshot = await db
+        .collection("notificationCampaigns")
+        .orderBy("createdAt", "desc")
+        .limit(10)
+        .get();
+
+      const campaigns = campaignsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      res.json({
+        ok: true,
+        app: "GENERAL FOOTBALL TIPS V1.0",
+        firebaseReady,
+        subscribers: subscriberSnapshot.size,
+        campaigns
+      });
+
+    } catch (error) {
+      console.error("Admin status error:", error.message);
+
+      res.status(500).json({
+        error: "Unable to load administrator dashboard."
+      });
+    }
+  }
+);
+
+/* =====================================
+   ADMIN TEST NOTIFICATION
+===================================== */
+
+app.post(
+  "/api/admin/test-notification",
+  requireAdmin,
+  async (req, res) => {
+    if (!firebaseReady) {
+      return res.status(503).json({
+        error: "Firebase is unavailable."
+      });
+    }
+
+    const token = cleanNotificationText(req.body.token, 4096);
+
+    const title = cleanNotificationText(
+      req.body.title || "GENERAL FOOTBALL TIPS",
+      100
+    );
+
+    const body = cleanNotificationText(
+      req.body.body || "Your test notification is working.",
+      300
+    );
+
+    if (!token) {
+      return res.status(400).json({
+        error: "Your device notification token is required."
+      });
+    }
+
+    try {
+      const messageId = await messaging.send({
+        token,
+        notification: {
+          title,
+          body
+        },
+        data: {
+          type: "test",
+          app: "GENERAL FOOTBALL TIPS"
+        },
+        webpush: {
+          notification: {
+            icon: "/icon-192.png",
+            badge: "/icon-192.png"
+          }
+        }
+      });
+
+      res.json({
+        ok: true,
+        message: "Test notification sent.",
+        messageId
+      });
+
+    } catch (error) {
+      console.error("Test notification error:", error.message);
+
+      res.status(400).json({
+        error: "Unable to send test notification.",
+        details: error.message
+      });
+    }
+  }
+);
+
+/* =====================================
+   MANUAL UPDATE APPROVAL
+===================================== */
+
+app.post(
+  "/api/admin/approve-update",
+  requireAdmin,
+  async (req, res) => {
+    if (!firebaseReady) {
+      return res.status(503).json({
+        error: "Firebase is unavailable."
+      });
+    }
+
+    const version = cleanNotificationText(
+      req.body.version,
+      40
+    );
+
+    const title = cleanNotificationText(
+      req.body.title,
+      100
+    );
+
+    const body = cleanNotificationText(
+      req.body.body,
+      300
+    );
+
+    if (!version || !title || !body) {
+      return res.status(400).json({
+        error: "Version, title and announcement are required."
+      });
+    }
+
+    const campaignId = crypto
+      .createHash("sha256")
+      .update(version.toLowerCase())
+      .digest("hex")
+      .slice(0, 40);
+
+    const campaignRef = db
+      .collection("notificationCampaigns")
+      .doc(campaignId);
+
+    try {
+      const reservation = await db.runTransaction(async transaction => {
+        const existing = await transaction.get(campaignRef);
+
+        if (existing.exists) {
+          return false;
+        }
+
+        transaction.create(campaignRef, {
+          version,
+          title,
+          body,
+          status: "sending",
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          sent: 0,
+          failed: 0
+        });
+
+        return true;
+      });
+
+      if (!reservation) {
+        return res.status(409).json({
+          error: "This version has already been approved or submitted.",
+          campaignId
+        });
+      }
+
+      const subscribersSnapshot = await db
+        .collection("notificationSubscribers")
+        .get();
+
+      const subscribers = subscribersSnapshot.docs;
+
+      let sent = 0;
+      let failed = 0;
+
+      const invalidDocuments = [];
+
+      for (let i = 0; i < subscribers.length; i += 500) {
+        const batch = subscribers.slice(i, i + 500);
+
+        const tokens = batch
+          .map(doc => doc.data().token)
+          .filter(Boolean);
+
+        if (!tokens.length) continue;
+
+        try {
+          const result = await messaging.sendEachForMulticast({
+            tokens,
+            notification: {
+              title,
+              body
+            },
+            data: {
+              type: "update",
+              version,
+              campaignId
+            },
+            webpush: {
+              notification: {
+                icon: "/icon-192.png",
+                badge: "/icon-192.png"
+              }
+            }
+          });
+
+          sent += result.successCount;
+          failed += result.failureCount;
+
+          result.responses.forEach((response, index) => {
+            if (
+              !response.success &&
+              notificationErrorIsInvalidToken(response.error)
+            ) {
+              invalidDocuments.push(batch[index].ref);
+            }
+          });
+
+        } catch (error) {
+          console.error(
+            "Notification batch failed:",
+            error.message
+          );
+
+          failed += tokens.length;
+        }
+      }
+
+      for (const document of invalidDocuments) {
+        try {
+          await document.delete();
+        } catch (error) {
+          console.error(
+            "Invalid subscription cleanup failed:",
+            error.message
+          );
+        }
+      }
+
+      await campaignRef.update({
+        status: failed === 0 ? "completed" : "completed_with_errors",
+        sent,
+        failed,
+        finishedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      res.json({
+        ok: true,
+        message: "Manual update notification campaign completed.",
+        version,
+        sent,
+        failed,
+        campaignId
+      });
+
+    } catch (error) {
+      console.error(
+        "Update approval error:",
+        error.message
+      );
+
+      try {
+        await campaignRef.set({
+          version,
+          title,
+          body,
+          status: "failed",
+          error: error.message,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      } catch (recordError) {
+        console.error(
+          "Campaign record error:",
+          recordError.message
+        );
+      }
+
+      res.status(500).json({
+        error: "The update notification campaign could not be completed.",
+        details: error.message
+      });
+    }
+  }
+);
+
+/* =====================================
    HEALTH CHECK
 ===================================== */
 
@@ -710,6 +1251,8 @@ app.get("/api/health", (req, res) => {
     ok: true,
     app: "GENERAL FOOTBALL TIPS V1.0",
     apiKeyConfigured: Boolean(API_TOKEN),
+    firebaseReady,
+    adminPasswordConfigured: Boolean(ADMIN_PASSWORD),
     timezone: TIME_ZONE,
     queuedRequests: apiQueue.length,
     runningRequest: apiRequestRunning,
