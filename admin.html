@@ -1,12 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
+<!DOCTYPE html><html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#071426">
-<title>GENERAL FOOTBALL TIPS - ADMIN</title>
-
-<style>
+<title>GENERAL FOOTBALL TIPS - ADMIN</title><style>
 *{box-sizing:border-box}
 
 body{
@@ -146,154 +143,96 @@ button.danger{
  body{padding:12px}
  .stats{grid-template-columns:1fr 1fr}
 }
-</style>
-</head>
-
-<body>
-
-<div class="container">
-
-<header>
+</style></head><body><div class="container"><header>
  <h1>⚽ GENERAL FOOTBALL TIPS</h1>
  <div class="subtitle">
  PRIVATE ADMINISTRATION · UPDATE CONTROL · FIREBASE NOTIFICATIONS
  </div>
-</header>
+</header><!-- LOGIN --><section class="panel" id="loginPanel">
+ <h2>ADMINISTRATOR LOGIN</h2><label>Private Admin Password</label>
+<input
+type="password"
+id="adminPassword"
+placeholder="Enter your admin password"
+autocomplete="current-password"
 
-<!-- LOGIN -->
+«»
 
-<section class="panel" id="loginPanel">
- <h2>ADMINISTRATOR LOGIN</h2>
-
- <label>Private Admin Password</label>
- <input
-  type="password"
-  id="adminPassword"
-  placeholder="Enter your admin password"
-  autocomplete="current-password"
- >
-
- <button id="loginButton">SECURE ADMIN LOGIN</button>
+<button id="loginButton">SECURE ADMIN LOGIN</button>
 
  <div class="status" id="loginStatus">
  Please authenticate to access the dashboard.
  </div>
-</section>
-
-<!-- DASHBOARD -->
-
-<div id="dashboard" class="hidden">
-
-<section class="panel">
- <h2>ADMIN DASHBOARD</h2>
-
- <div class="stats">
+</section><!-- DASHBOARD --><div id="dashboard" class="hidden"><section class="panel">
+ <h2>ADMIN DASHBOARD</h2> <div class="stats">
   <div class="stat">
    <span>SUBSCRIBED DEVICES</span>
    <strong id="subscriberCount">0</strong>
-  </div>
-
-  <div class="stat">
+  </div>  <div class="stat">
    <span>FIREBASE STATUS</span>
    <strong id="firebaseStatus">—</strong>
   </div>
- </div>
-
- <button class="secondary" id="refreshButton">
+ </div> <button class="secondary" id="refreshButton">
  REFRESH DASHBOARD
  </button>
-</section>
+</section><!-- VERSION INFORMATION --><section class="panel">
+ <h2>APP VERSION CONTROL</h2><label>Current App Version</label>
+<input
+id="currentVersion"
+value="V1.0"
+placeholder="Example: V1.0"
 
-<!-- VERSION INFORMATION -->
+«»
 
-<section class="panel">
- <h2>APP VERSION CONTROL</h2>
+<label>New App Version</label>
+<input
+id="newVersion"
+placeholder="Example: V1.1"
 
- <label>Current App Version</label>
- <input
-  id="currentVersion"
-  value="V1.0"
-  placeholder="Example: V1.0"
- >
-
- <label>New App Version</label>
- <input
-  id="newVersion"
-  placeholder="Example: V1.1"
- >
+«»
 
  <p class="small">
  The current version is for your records.
  The new version identifies the notification campaign.
  </p>
-</section>
+</section><!-- ANNOUNCEMENT --><section class="panel">
+ <h2>UPDATE ANNOUNCEMENT</h2><label>Notification Title</label>
+<input
+id="announcementTitle"
+value="GENERAL FOOTBALL TIPS UPDATE"
+maxlength="100"
 
-<!-- ANNOUNCEMENT -->
+«»
 
-<section class="panel">
- <h2>UPDATE ANNOUNCEMENT</h2>
+<label>Announcement Message</label>
 
- <label>Notification Title</label>
- <input
-  id="announcementTitle"
-  value="GENERAL FOOTBALL TIPS UPDATE"
-  maxlength="100"
- >
-
- <label>Announcement Message</label>
  <textarea
   id="announcementBody"
   maxlength="300"
   placeholder="Describe the improvements in this update..."
- ></textarea>
-
- <button class="secondary" id="testButton">
+ ></textarea> <button class="secondary" id="testButton">
  SEND TEST NOTIFICATION TO MY DEVICE
- </button>
-
- <div class="status" id="testStatus">
+ </button> <div class="status" id="testStatus">
  Test notifications are sent only to this device.
  </div>
-</section>
-
-<!-- APPROVAL -->
-
-<section class="panel">
- <h2>MANUAL UPDATE APPROVAL</h2>
-
- <p class="small">
+</section><!-- APPROVAL --><section class="panel">
+ <h2>MANUAL UPDATE APPROVAL</h2> <p class="small">
  Important: This action sends the announcement to all
  currently subscribed devices. Check your app carefully
  before approving.
- </p>
-
- <button id="approveButton">
+ </p> <button id="approveButton">
  APPROVE UPDATE &amp; NOTIFY USERS
- </button>
-
- <div class="status" id="approvalStatus">
+ </button> <div class="status" id="approvalStatus">
  No update campaign submitted yet.
  </div>
-</section>
-
-<!-- CAMPAIGN HISTORY -->
-
-<section class="panel">
- <h2>NOTIFICATION DELIVERY RECORDS</h2>
-
- <div id="campaignList">
+</section><!-- CAMPAIGN HISTORY --><section class="panel">
+ <h2>NOTIFICATION DELIVERY RECORDS</h2> <div id="campaignList">
  No campaign records loaded.
  </div>
-</section>
-
-<button class="danger" id="logoutButton">
+</section><button class="danger" id="logoutButton">
  LOG OUT OF ADMIN DASHBOARD
-</button>
-
-</div>
-</div>
-
-<script>
+</button></div>
+</div><script>
 "use strict";
 
 const API = "";
@@ -455,12 +394,15 @@ function renderCampaigns(campaigns){
 
 $("refreshButton").addEventListener("click",loadDashboard);
 
-/* TEST NOTIFICATION */
+/* TEST NOTIFICATION — SEND THE ACTUAL ANNOUNCEMENT TO MY DEVICE ONLY */
 
 $("testButton").addEventListener("click",async()=>{
  const token = localStorage.getItem(
   "gtp_firebase_token"
  );
+
+ const title = $("announcementTitle").value.trim();
+ const body = $("announcementBody").value.trim();
 
  if(!token){
   showMessage(
@@ -470,7 +412,20 @@ $("testButton").addEventListener("click",async()=>{
   return;
  }
 
+ if(!title || !body){
+  showMessage(
+   "testStatus",
+   "Enter both the notification title and announcement message first."
+  );
+  return;
+ }
+
  $("testButton").disabled = true;
+
+ showMessage(
+  "testStatus",
+  "Sending your announcement test to this device..."
+ );
 
  try{
   const result = await apiRequest(
@@ -479,14 +434,16 @@ $("testButton").addEventListener("click",async()=>{
     method:"POST",
     body:JSON.stringify({
      token,
-     title:$("announcementTitle").value.trim() ||
-      "GENERAL FOOTBALL TIPS",
-     body:"Your administrator test notification is working."
+     title,
+     body
     })
    }
   );
 
-  showMessage("testStatus",result.message);
+  showMessage(
+   "testStatus",
+   result.message || "Your announcement test was sent to this device."
+  );
 
  }catch(error){
   showMessage("testStatus",error.message);
@@ -575,7 +532,5 @@ $("logoutButton").addEventListener("click",logout);
 if(adminToken){
  loadDashboard();
 }
-</script>
-
-</body>
+</script></body>
 </html>
