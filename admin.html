@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#071426">
+<title>GENERAL FOOTBALL TIPS - ADMIN</title>
+
+<style>
+*{box-sizing:border-box}
+
+body{
+ margin:0;
+ padding:20px;
+ font-family:Arial,sans-serif;
+ color:#fff;
+ background:
+ radial-gradient(ellipse at top,#102a48 0%,transparent 48%),
+ linear-gradient(160deg,#071426,#091b31 55%,#061120);
+ min-height:100vh;
+}
+
+.container{max-width:850px;margin:auto}
+
+header{
+ padding:22px;
+ background:#10223a;
+ border:1px solid #258cff;
+ border-radius:15px;
+ margin-bottom:20px;
+}
+
+h1{font-size:21px;margin:0;color:#65ffc0}
+.subtitle{font-size:12px;color:#9db3ca;margin-top:8px}
+
+.panel{
+ background:#10223a;
+ border:1px solid #23415e;
+ border-radius:13px;
+ padding:19px;
+ margin-bottom:18px;
+}
+
+h2{
+ font-size:16px;
+ color:#65ffc0;
+ margin-top:0;
+}
+
+label{
+ display:block;
+ font-size:12px;
+ color:#b8c9da;
+ margin:14px 0 7px;
+}
+
+input,textarea{
+ width:100%;
+ padding:13px;
+ border-radius:8px;
+ border:1px solid #34516d;
+ background:#071426;
+ color:#fff;
+ outline:none;
+ font-size:14px;
+}
+
+textarea{min-height:100px;resize:vertical}
+
+button{
+ width:100%;
+ padding:14px;
+ border:0;
+ border-radius:9px;
+ margin-top:13px;
+ background:#35ffad;
+ color:#071426;
+ font-weight:900;
+ cursor:pointer;
+}
+
+button:disabled{opacity:.5}
+
+button.secondary{
+ background:#258cff;
+ color:#fff;
+}
+
+button.danger{
+ background:#a83248;
+ color:#fff;
+}
+
+.status{
+ margin-top:12px;
+ padding:12px;
+ border-radius:8px;
+ background:#071426;
+ color:#65ffc0;
+ font-size:13px;
+ overflow-wrap:anywhere;
+}
+
+.stats{
+ display:grid;
+ grid-template-columns:repeat(2,1fr);
+ gap:12px;
+}
+
+.stat{
+ background:#071426;
+ border:1px solid #28425d;
+ border-radius:10px;
+ padding:15px;
+}
+
+.stat strong{
+ display:block;
+ font-size:25px;
+ color:#35ffad;
+ margin-top:8px;
+}
+
+.stat span{font-size:11px;color:#a9bed3}
+
+.campaign{
+ padding:13px;
+ margin-top:10px;
+ background:#071426;
+ border-left:3px solid #35ffad;
+ border-radius:7px;
+ font-size:12px;
+ line-height:1.7;
+ overflow-wrap:anywhere;
+}
+
+.hidden{display:none!important}
+
+.small{
+ font-size:11px;
+ color:#9db3ca;
+ line-height:1.6;
+}
+
+@media(max-width:450px){
+ body{padding:12px}
+ .stats{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<header>
+ <h1>⚽ GENERAL FOOTBALL TIPS</h1>
+ <div class="subtitle">
+ PRIVATE ADMINISTRATION · UPDATE CONTROL · FIREBASE NOTIFICATIONS
+ </div>
+</header>
+
+<!-- LOGIN -->
+
+<section class="panel" id="loginPanel">
+ <h2>ADMINISTRATOR LOGIN</h2>
+
+ <label>Private Admin Password</label>
+ <input
+  type="password"
+  id="adminPassword"
+  placeholder="Enter your admin password"
+  autocomplete="current-password"
+ >
+
+ <button id="loginButton">SECURE ADMIN LOGIN</button>
+
+ <div class="status" id="loginStatus">
+ Please authenticate to access the dashboard.
+ </div>
+</section>
+
+<!-- DASHBOARD -->
+
+<div id="dashboard" class="hidden">
+
+<section class="panel">
+ <h2>ADMIN DASHBOARD</h2>
+
+ <div class="stats">
+  <div class="stat">
+   <span>SUBSCRIBED DEVICES</span>
+   <strong id="subscriberCount">0</strong>
+  </div>
+
+  <div class="stat">
+   <span>FIREBASE STATUS</span>
+   <strong id="firebaseStatus">—</strong>
+  </div>
+ </div>
+
+ <button class="secondary" id="refreshButton">
+ REFRESH DASHBOARD
+ </button>
+</section>
+
+<!-- VERSION INFORMATION -->
+
+<section class="panel">
+ <h2>APP VERSION CONTROL</h2>
+
+ <label>Current App Version</label>
+ <input
+  id="currentVersion"
+  value="V1.0"
+  placeholder="Example: V1.0"
+ >
+
+ <label>New App Version</label>
+ <input
+  id="newVersion"
+  placeholder="Example: V1.1"
+ >
+
+ <p class="small">
+ The current version is for your records.
+ The new version identifies the notification campaign.
+ </p>
+</section>
+
+<!-- ANNOUNCEMENT -->
+
+<section class="panel">
+ <h2>UPDATE ANNOUNCEMENT</h2>
+
+ <label>Notification Title</label>
+ <input
+  id="announcementTitle"
+  value="GENERAL FOOTBALL TIPS UPDATE"
+  maxlength="100"
+ >
+
+ <label>Announcement Message</label>
+ <textarea
+  id="announcementBody"
+  maxlength="300"
+  placeholder="Describe the improvements in this update..."
+ ></textarea>
+
+ <button class="secondary" id="testButton">
+ SEND TEST NOTIFICATION TO MY DEVICE
+ </button>
+
+ <div class="status" id="testStatus">
+ Test notifications are sent only to this device.
+ </div>
+</section>
+
+<!-- APPROVAL -->
+
+<section class="panel">
+ <h2>MANUAL UPDATE APPROVAL</h2>
+
+ <p class="small">
+ Important: This action sends the announcement to all
+ currently subscribed devices. Check your app carefully
+ before approving.
+ </p>
+
+ <button id="approveButton">
+ APPROVE UPDATE &amp; NOTIFY USERS
+ </button>
+
+ <div class="status" id="approvalStatus">
+ No update campaign submitted yet.
+ </div>
+</section>
+
+<!-- CAMPAIGN HISTORY -->
+
+<section class="panel">
+ <h2>NOTIFICATION DELIVERY RECORDS</h2>
+
+ <div id="campaignList">
+ No campaign records loaded.
+ </div>
+</section>
+
+<button class="danger" id="logoutButton">
+ LOG OUT OF ADMIN DASHBOARD
+</button>
+
+</div>
+</div>
+
+<script>
+"use strict";
+
+const API = "";
+
+let adminToken =
+ sessionStorage.getItem("gtp_admin_session") || "";
+
+const $ = id => document.getElementById(id);
+
+async function apiRequest(url, options = {}) {
+ const headers = {
+  "Content-Type":"application/json",
+  ...(options.headers || {})
+ };
+
+ if (adminToken) {
+  headers.Authorization = "Bearer " + adminToken;
+ }
+
+ const response = await fetch(API + url,{
+  ...options,
+  headers
+ });
+
+ const result = await response.json();
+
+ if (!response.ok) {
+  throw new Error(result.error || "Request failed.");
+ }
+
+ return result;
+}
+
+function showMessage(id,message){
+ $(id).textContent = message;
+}
+
+function formatDate(value){
+ if(!value) return "Not available";
+
+ if(value.seconds){
+  return new Date(value.seconds * 1000).toLocaleString();
+ }
+
+ const date = new Date(value);
+
+ return isNaN(date.getTime())
+  ? "Not available"
+  : date.toLocaleString();
+}
+
+/* LOGIN */
+
+$("loginButton").addEventListener("click",async()=>{
+ const password = $("adminPassword").value;
+
+ if(!password){
+  showMessage("loginStatus","Enter your password.");
+  return;
+ }
+
+ $("loginButton").disabled = true;
+
+ try{
+  const result = await apiRequest(
+   "/api/admin/login",
+   {
+    method:"POST",
+    body:JSON.stringify({password})
+   }
+  );
+
+  adminToken = result.token;
+
+  sessionStorage.setItem(
+   "gtp_admin_session",
+   adminToken
+  );
+
+  $("adminPassword").value = "";
+
+  await loadDashboard();
+
+ }catch(error){
+  showMessage("loginStatus",error.message);
+
+ }finally{
+  $("loginButton").disabled = false;
+ }
+});
+
+/* DASHBOARD DATA */
+
+async function loadDashboard(){
+ try{
+  const data = await apiRequest(
+   "/api/admin/status"
+  );
+
+  $("loginPanel").classList.add("hidden");
+  $("dashboard").classList.remove("hidden");
+
+  $("subscriberCount").textContent =
+   data.subscribers ?? 0;
+
+  $("firebaseStatus").textContent =
+   data.firebaseReady ? "READY" : "OFFLINE";
+
+  renderCampaigns(data.campaigns || []);
+
+ }catch(error){
+  if(error.message.includes("authentication")){
+   logout();
+   showMessage("loginStatus","Session expired. Please log in again.");
+  }else{
+   showMessage("approvalStatus",error.message);
+  }
+ }
+}
+
+/* CAMPAIGN RECORDS */
+
+function renderCampaigns(campaigns){
+ const container = $("campaignList");
+
+ if(!campaigns.length){
+  container.textContent = "No notification campaigns yet.";
+  return;
+ }
+
+ container.replaceChildren();
+
+ campaigns.forEach(campaign=>{
+  const card = document.createElement("div");
+  card.className = "campaign";
+
+  const title = document.createElement("strong");
+  title.textContent =
+   "VERSION " + (campaign.version || "Unknown");
+
+  const details = document.createElement("div");
+
+  details.textContent =
+   "Status: " + (campaign.status || "Unknown") +
+   " | Sent: " + (campaign.sent ?? 0) +
+   " | Failed: " + (campaign.failed ?? 0);
+
+  const date = document.createElement("div");
+
+  date.textContent =
+   "Created: " + formatDate(campaign.createdAt);
+
+  card.append(title,details,date);
+  container.appendChild(card);
+ });
+}
+
+/* REFRESH */
+
+$("refreshButton").addEventListener("click",loadDashboard);
+
+/* TEST NOTIFICATION */
+
+$("testButton").addEventListener("click",async()=>{
+ const token = localStorage.getItem(
+  "gtp_firebase_token"
+ );
+
+ if(!token){
+  showMessage(
+   "testStatus",
+   "This browser has no saved notification token. Enable notifications on this device first."
+  );
+  return;
+ }
+
+ $("testButton").disabled = true;
+
+ try{
+  const result = await apiRequest(
+   "/api/admin/test-notification",
+   {
+    method:"POST",
+    body:JSON.stringify({
+     token,
+     title:$("announcementTitle").value.trim() ||
+      "GENERAL FOOTBALL TIPS",
+     body:"Your administrator test notification is working."
+    })
+   }
+  );
+
+  showMessage("testStatus",result.message);
+
+ }catch(error){
+  showMessage("testStatus",error.message);
+
+ }finally{
+  $("testButton").disabled = false;
+ }
+});
+
+/* MANUAL APPROVAL */
+
+$("approveButton").addEventListener("click",async()=>{
+ const version = $("newVersion").value.trim();
+ const title = $("announcementTitle").value.trim();
+ const body = $("announcementBody").value.trim();
+
+ if(!version || !title || !body){
+  showMessage(
+   "approvalStatus",
+   "Enter the new version, notification title and announcement."
+  );
+  return;
+ }
+
+ const confirmed = confirm(
+  "FINAL APPROVAL\n\n" +
+  "Version: " + version +
+  "\n\nThis will send notifications to ALL subscribed devices.\n\nContinue?"
+ );
+
+ if(!confirmed) return;
+
+ $("approveButton").disabled = true;
+
+ showMessage(
+  "approvalStatus",
+  "Processing notification campaign. Please wait..."
+ );
+
+ try{
+  const result = await apiRequest(
+   "/api/admin/approve-update",
+   {
+    method:"POST",
+    body:JSON.stringify({
+     version,
+     title,
+     body
+    })
+   }
+  );
+
+  showMessage(
+   "approvalStatus",
+   "CAMPAIGN COMPLETED\n" +
+   "Version: " + result.version +
+   "\nSuccessfully sent: " + result.sent +
+   "\nFailed: " + result.failed
+  );
+
+  await loadDashboard();
+
+ }catch(error){
+  showMessage("approvalStatus",error.message);
+
+ }finally{
+  $("approveButton").disabled = false;
+ }
+});
+
+/* LOGOUT */
+
+function logout(){
+ adminToken = "";
+
+ sessionStorage.removeItem("gtp_admin_session");
+
+ $("dashboard").classList.add("hidden");
+ $("loginPanel").classList.remove("hidden");
+}
+
+$("logoutButton").addEventListener("click",logout);
+
+/* RESTORE SESSION */
+
+if(adminToken){
+ loadDashboard();
+}
+</script>
+
+</body>
+</html>
