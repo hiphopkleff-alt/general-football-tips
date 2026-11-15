@@ -13,7 +13,7 @@ importScripts(
 );
 
 const firebaseConfig = {
-  apiKey: "AIzaSyC29k6H32V4smIJmQbaJpmT8s-9gFJ9M",
+  apiKey: "AIzaSyC29k6H32V4smIJmQbaJpmT8s-9gO-FJ9M",
   authDomain: "general-football-tips.firebaseapp.com",
   projectId: "general-football-tips",
   storageBucket: "general-football-tips.firebasestorage.app",
