@@ -960,11 +960,11 @@ const headToHead = calculateHeadToHead(
     },
 
     teamForm: {
-      home: homeStats,
-      away: awayStats
-       headToHead,
-    },
+  home: homeStats,
+  away: awayStats
+},
 
+headToHead,
     probabilities: roundedProbabilities,
 
     recommendations,
