@@ -1931,6 +1931,92 @@ function refreshVIP(){
  buildVIP(true);
 }
 
+ /* =====================================================
+   DASHBOARD FEATURED MATCHES
+===================================================== */
+
+function renderFeaturedMatches(){
+
+ const box=$('featuredMatches');
+
+ if(!box)return;
+
+ const matches=currentFixtures
+  .filter(match=>
+   !['ENDED',...EXCLUDED_STATUSES].includes(getStatus(match))
+  )
+  .slice()
+  .sort((a,b)=>
+   new Date(getMatchDate(a)||0)-
+   new Date(getMatchDate(b)||0)
+  )
+  .slice(0,4);
+
+ if(!matches.length){
+
+  box.innerHTML=`
+   <div class="empty">
+    No featured fixtures available right now.
+    <br><br>
+    Please check again later.
+   </div>
+  `;
+
+  return;
+ }
+
+ box.innerHTML=matches.map(match=>{
+
+  const index=currentFixtures.indexOf(match);
+
+  return `
+   <div class="featured-match">
+
+    <div class="featured-match-top">
+     <span>${escapeHTML(competitionName(match))}</span>
+     <span>${escapeHTML(formatDate(getMatchDate(match)))}</span>
+    </div>
+
+    <div class="featured-match-teams">
+
+     <span>${escapeHTML(getHome(match))}</span>
+
+     <b>VS</b>
+
+     <span>${escapeHTML(getAway(match))}</span>
+
+    </div>
+
+    <button onclick="openMatch(${index})">
+     VIEW MATCH ANALYSIS →
+    </button>
+
+   </div>
+  `;
+
+ }).join('');
+
+}
+
+
+/* =====================================================
+   QUICK ACCESS ANALYSIS
+===================================================== */
+
+function openFirstAvailableMatch(){
+
+ if(!currentFixtures.length){
+
+  alert('No available fixtures at the moment. Please refresh later.');
+
+  showPage('predictions');
+
+  return;
+ }
+
+ openMatch(0);
+
+ }
 /* =====================================================
    DASHBOARD
 ===================================================== */
