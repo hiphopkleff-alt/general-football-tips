@@ -648,9 +648,6 @@ function makeRecommendations(probabilities) {
     ["Double Chance X2", "doubleChanceX2"],
     ["Double Chance 12", "doubleChance12"],
 
-    ["Over 0.5 Goals", "over05"],
-    ["Under 0.5 Goals", "under05"],
-
     ["Over 1.5 Goals", "over15"],
     ["Under 1.5 Goals", "under15"],
 
@@ -676,7 +673,6 @@ function makeRecommendations(probabilities) {
       item.probability <= 100
     )
     .sort((a, b) => b.probability - a.probability)
-    .slice(0, 3)
     .map((item, index) => ({
       rank: index + 1,
       market: item.market,
