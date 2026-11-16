@@ -12,7 +12,6 @@ const PORT = process.env.PORT || 10000;
 const API_TOKEN = process.env.FOOTBALL_DATA_TOKEN;
 const API_BASE = "https://api.football-data.org/v4";
 const TIME_ZONE = "Africa/Lagos";
-
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 app.disable("x-powered-by");
@@ -66,9 +65,7 @@ function safeCompare(first, second) {
   const a = Buffer.from(String(first || ""));
   const b = Buffer.from(String(second || ""));
 
-  if (a.length !== b.length) {
-    return false;
-  }
+  if (a.length !== b.length) return false;
 
   return crypto.timingSafeEqual(a, b);
 }
@@ -93,9 +90,7 @@ function requireAdmin(req, res, next) {
   const session = adminSessions.get(token);
 
   if (!session || Date.now() > session.expiresAt) {
-    if (token) {
-      adminSessions.delete(token);
-    }
+    if (token) adminSessions.delete(token);
 
     return res.status(401).json({
       error: "Administrator authentication required."
@@ -117,12 +112,10 @@ function hashToken(token) {
 }
 
 function notificationErrorIsInvalidToken(error) {
-  const invalidCodes = [
+  return [
     "messaging/registration-token-not-registered",
     "messaging/invalid-registration-token"
-  ];
-
-  return invalidCodes.includes(error?.code);
+  ].includes(error?.code);
 }
 
 function cleanNotificationText(value, maxLength) {
@@ -154,9 +147,9 @@ const analysisCache = new Map();
 const teamCache = new Map();
 const matchCache = new Map();
 const h2hCache = new Map();
-const h2hPending = new Map();
 
 const teamPending = new Map();
+const h2hPending = new Map();
 const analysisPending = new Map();
 
 let pendingFixtures = null;
@@ -192,7 +185,10 @@ function promoteFootballRequest(endpoint, priority) {
 
   if (!task || task.state !== "queued") return;
 
-  if (priorityWeight(priority) < priorityWeight(task.priority)) {
+  if (
+    priorityWeight(priority) <
+    priorityWeight(task.priority)
+  ) {
     task.priority = priority;
 
     if (apiQueueTimer) {
@@ -513,78 +509,83 @@ function calculateProbabilities(homeXG, awayXG) {
 
 function getTeamStats(matches, teamId) {
   const finished = (matches || [])
-    .filter(match => match.status === "FINISHED")
+    .filter(match =>
+      match.status === "FINISHED" &&
+      match.score?.fullTime?.home != null &&
+      match.score?.fullTime?.away != null
+    )
+    .sort((a, b) =>
+      new Date(b.utcDate) - new Date(a.utcDate)
+    );
+
+  const recent = finished.slice(0, 10);
+
+  const homeMatches = finished
+    .filter(match => match.homeTeam?.id === teamId)
     .slice(0, 10);
 
-  let played = 0;
-  let wins = 0;
-  let draws = 0;
-  let losses = 0;
+  const awayMatches = finished
+    .filter(match => match.awayTeam?.id === teamId)
+    .slice(0, 10);
 
-  let goalsFor = 0;
-  let goalsAgainst = 0;
+  function calculateGroup(group) {
+    let played = 0;
+    let wins = 0;
+    let draws = 0;
+    let losses = 0;
+    let goalsFor = 0;
+    let goalsAgainst = 0;
 
-  const form = [];
+    const form = [];
 
-  for (const match of finished) {
-    const homeId = match.homeTeam?.id;
-    const awayId = match.awayTeam?.id;
+    for (const match of group) {
+      const isHome = match.homeTeam?.id === teamId;
 
-    const homeGoals = match.score?.fullTime?.home;
-    const awayGoals = match.score?.fullTime?.away;
+      const scored = isHome
+        ? match.score.fullTime.home
+        : match.score.fullTime.away;
 
-    if (
-      homeGoals == null ||
-      awayGoals == null
-    ) {
-      continue;
+      const conceded = isHome
+        ? match.score.fullTime.away
+        : match.score.fullTime.home;
+
+      played++;
+      goalsFor += scored;
+      goalsAgainst += conceded;
+
+      if (scored > conceded) {
+        wins++;
+        form.push("W");
+      } else if (scored === conceded) {
+        draws++;
+        form.push("D");
+      } else {
+        losses++;
+        form.push("L");
+      }
     }
 
-    let scored;
-    let conceded;
-
-    if (homeId === teamId) {
-      scored = homeGoals;
-      conceded = awayGoals;
-    } else if (awayId === teamId) {
-      scored = awayGoals;
-      conceded = homeGoals;
-    } else {
-      continue;
-    }
-
-    played++;
-
-    goalsFor += scored;
-    goalsAgainst += conceded;
-
-    if (scored > conceded) {
-      wins++;
-      form.push("W");
-    } else if (scored === conceded) {
-      draws++;
-      form.push("D");
-    } else {
-      losses++;
-      form.push("L");
-    }
+    return {
+      played,
+      wins,
+      draws,
+      losses,
+      goalsFor,
+      goalsAgainst,
+      averageGoalsFor: played ? goalsFor / played : 0,
+      averageGoalsAgainst: played ? goalsAgainst / played : 0,
+      form
+    };
   }
 
+  const overall = calculateGroup(recent);
+  const home = calculateGroup(homeMatches);
+  const away = calculateGroup(awayMatches);
+
   return {
-    played,
-    wins,
-    draws,
-    losses,
-    goalsFor,
-    goalsAgainst,
-
-    averageGoalsFor:
-      played ? goalsFor / played : 0,
-
-    averageGoalsAgainst:
-      played ? goalsAgainst / played : 0,
-
-    form
+    ...overall,
+    home,
+    away
   };
 }
 
@@ -611,14 +612,22 @@ async function getTeamHistory(teamId, priorityState) {
   }
 
   const endpoint =
-    `/teams/${encodeURIComponent(key)}/matches?status=FINISHED&limit=10`;
+    `/teams/${encodeURIComponent(key)}/matches?status=FINISHED&limit=30`;
 
   const request = footballRequest(
     endpoint,
     priorityState.priority
   )
     .then(data => {
-      const matches = data.matches || [];
+      const matches = (data.matches || [])
+        .filter(match =>
+          match.status === "FINISHED" &&
+          match.score?.fullTime?.home != null &&
+          match.score?.fullTime?.away != null
+        )
+        .sort((a, b) =>
+          new Date(b.utcDate) - new Date(a.utcDate)
+        );
 
       cacheSet(teamCache, key, matches, 60);
 
@@ -635,6 +644,7 @@ async function getTeamHistory(teamId, priorityState) {
 
   return request;
 }
+
 /* =====================================
    HEAD-TO-HEAD HISTORY
 ===================================== */
@@ -675,13 +685,27 @@ async function getHeadToHead(matchId, priorityState) {
           new Date(b.utcDate) - new Date(a.utcDate)
         );
 
-      const result = {
-        matches
-      };
+      console.log(
+        "H2H response:",
+        matchId,
+        "meetings:",
+        matches.length
+      );
+
+      const result = { matches };
 
       cacheSet(h2hCache, key, result, 1440);
 
       return result;
+    })
+    .catch(error => {
+      console.error(
+        "H2H API request failed:",
+        matchId,
+        error.message
+      );
+
+      throw error;
     })
     .finally(() => {
       h2hPending.delete(key);
@@ -711,6 +735,9 @@ function calculateHeadToHead(matches, homeId, awayId) {
     homeGoals: 0,
     awayGoals: 0,
 
+    averageHomeGoals: 0,
+    averageAwayGoals: 0,
+
     recentMeetings: []
   };
 
@@ -732,8 +759,6 @@ function calculateHeadToHead(matches, homeId, awayId) {
       continue;
     }
 
-    result.played++;
-
     let goalsFor;
     let goalsAgainst;
 
@@ -744,6 +769,8 @@ function calculateHeadToHead(matches, homeId, awayId) {
       goalsFor = awayGoals;
       goalsAgainst = homeGoals;
     }
+
+    result.played++;
 
     result.homeGoals += goalsFor;
     result.awayGoals += goalsAgainst;
@@ -765,13 +792,114 @@ function calculateHeadToHead(matches, homeId, awayId) {
       homeGoals,
       awayGoals,
 
+      goalsFor,
+      goalsAgainst,
+
       status: match.status
     });
   }
 
-  result.available = result.played > 0;
+  if (result.played > 0) {
+    result.available = true;
+
+    result.averageHomeGoals =
+      result.homeGoals / result.played;
+
+    result.averageAwayGoals =
+      result.awayGoals / result.played;
+  }
 
   return result;
+}
+
+/* =====================================
+   EXPECTED GOALS MODEL
+===================================== */
+
+function calculateExpectedGoals(homeStats, awayStats, headToHead) {
+  const homeOverallAttack =
+    homeStats.averageGoalsFor;
+
+  const homeOverallDefence =
+    homeStats.averageGoalsAgainst;
+
+  const awayOverallAttack =
+    awayStats.averageGoalsFor;
+
+  const awayOverallDefence =
+    awayStats.averageGoalsAgainst;
+
+  const homeVenueAttack =
+    homeStats.home.played
+      ? homeStats.home.averageGoalsFor
+      : homeOverallAttack;
+
+  const homeVenueDefence =
+    homeStats.home.played
+      ? homeStats.home.averageGoalsAgainst
+      : homeOverallDefence;
+
+  const awayVenueAttack =
+    awayStats.away.played
+      ? awayStats.away.averageGoalsFor
+      : awayOverallAttack;
+
+  const awayVenueDefence =
+    awayStats.away.played
+      ? awayStats.away.averageGoalsAgainst
+      : awayOverallDefence;
+
+  const overallHomeXG =
+    (homeOverallAttack + awayOverallDefence) / 2;
+
+  const overallAwayXG =
+    (awayOverallAttack + homeOverallDefence) / 2;
+
+  const homeVenueWeight = Math.min(
+    0.65,
+    Math.min(homeStats.home.played, awayStats.away.played) / 10 * 0.65
+  );
+
+  const venueHomeXG =
+    (homeVenueAttack + awayVenueDefence) / 2;
+
+  const venueAwayXG =
+    (awayVenueAttack + homeVenueDefence) / 2;
+
+  let homeXG =
+    overallHomeXG * (1 - homeVenueWeight) +
+    venueHomeXG * homeVenueWeight;
+
+  let awayXG =
+    overallAwayXG * (1 - homeVenueWeight) +
+    venueAwayXG * homeVenueWeight;
+
+  let h2hWeight = 0;
+
+  if (headToHead?.played > 0) {
+    h2hWeight = Math.min(
+      0.15,
+      headToHead.played * 0.03
+    );
+
+    homeXG =
+      homeXG * (1 - h2hWeight) +
+      headToHead.averageHomeGoals * h2hWeight;
+
+    awayXG =
+      awayXG * (1 - h2hWeight) +
+      headToHead.averageAwayGoals * h2hWeight;
+  }
+
+  homeXG = Math.max(0.2, Math.min(4, homeXG));
+  awayXG = Math.max(0.2, Math.min(4, awayXG));
+
+  return {
+    homeXG,
+    awayXG,
+    venueWeight: homeVenueWeight,
+    h2hWeight
+  };
 }
 
 /* =====================================
@@ -812,16 +940,19 @@ function makeRecommendations(probabilities) {
       item.probability > 0 &&
       item.probability <= 100
     )
-    .sort((a, b) => b.probability - a.probability)
+    .sort((a, b) =>
+      b.probability - a.probability
+    )
     .map((item, index) => ({
       rank: index + 1,
       market: item.market,
       key: item.key,
       probability: Number(item.probability.toFixed(1)),
+
       confidence:
-        item.probability >= 75
+        item.probability >= 70
           ? "HIGH"
-          : item.probability >= 60
+          : item.probability >= 55
             ? "MODERATE"
             : "LOW"
     }));
@@ -853,29 +984,39 @@ async function buildMatchAnalysis(matchId, priorityState) {
   const awayId = match.awayTeam.id;
 
   const [homeMatches, awayMatches, h2hData] =
-  await Promise.all([
-    getTeamHistory(homeId, priorityState),
-    getTeamHistory(awayId, priorityState),
+    await Promise.all([
+      getTeamHistory(homeId, priorityState),
+      getTeamHistory(awayId, priorityState),
 
-    getHeadToHead(matchId, priorityState)
-      .catch(error => {
-        console.error(
-          "H2H analysis unavailable:",
-          error.message
-        );
+      getHeadToHead(matchId, priorityState)
+        .catch(error => {
+          console.error(
+            "H2H analysis unavailable:",
+            error.message
+          );
 
-        return { matches: [] };
-      })
-  ]);
+          return {
+            matches: [],
+            unavailable: true
+          };
+        })
+    ]);
 
-const headToHead = calculateHeadToHead(
-  h2hData.matches,
-  homeId,
-  awayId
-);
+  const headToHead = calculateHeadToHead(
+    h2hData.matches,
+    homeId,
+    awayId
+  );
 
-  const homeStats = getTeamStats(homeMatches, homeId);
-  const awayStats = getTeamStats(awayMatches, awayId);
+  const homeStats = getTeamStats(
+    homeMatches,
+    homeId
+  );
+
+  const awayStats = getTeamStats(
+    awayMatches,
+    awayId
+  );
 
   if (!homeStats.played || !awayStats.played) {
     const error = new Error(
@@ -889,34 +1030,19 @@ const headToHead = calculateHeadToHead(
     throw error;
   }
 
-  const homeXG = Math.max(
-    0.2,
-    Math.min(
-      4,
-      (
-        homeStats.averageGoalsFor +
-        awayStats.averageGoalsAgainst
-      ) / 2
-    )
+  const expected = calculateExpectedGoals(
+    homeStats,
+    awayStats,
+    headToHead
   );
 
-  const awayXG = Math.max(
-    0.2,
-    Math.min(
-      4,
-      (
-        awayStats.averageGoalsFor +
-        homeStats.averageGoalsAgainst
-      ) / 2
-    )
-  );
+  const homeXG = expected.homeXG;
+  const awayXG = expected.awayXG;
 
   const probabilities = calculateProbabilities(
     homeXG,
     awayXG
   );
-
-  const recommendations = makeRecommendations(probabilities);
 
   const roundedProbabilities = Object.fromEntries(
     Object.entries(probabilities).map(([key, value]) => [
@@ -924,6 +1050,21 @@ const headToHead = calculateHeadToHead(
       Number(value.toFixed(1))
     ])
   );
+
+  const recommendations = makeRecommendations(
+    roundedProbabilities
+  );
+
+  /*
+    VIP recommendation:
+    No fixed 75% qualification threshold.
+    The strongest supported market is returned.
+  */
+
+  const vipRecommendation =
+    recommendations.length
+      ? recommendations[0]
+      : null;
 
   return {
     match: {
@@ -953,27 +1094,49 @@ const headToHead = calculateHeadToHead(
 
     model: {
       name: "GENERAL TIPS Statistical Model",
+
       expectedHomeGoals: Number(homeXG.toFixed(2)),
       expectedAwayGoals: Number(awayXG.toFixed(2)),
+
       matchesPerTeam: 10,
-      note: "Estimates based on available recent completed match results."
+
+      homeVenueMatches: homeStats.home.played,
+      awayVenueMatches: awayStats.away.played,
+
+      h2hMatches: headToHead.played,
+
+      h2hInfluence: Number(
+        (expected.h2hWeight * 100).toFixed(1)
+      ),
+
+      venueInfluence: Number(
+        (expected.venueWeight * 100).toFixed(1)
+      ),
+
+      note:
+        "Estimates combine recent results, venue performance, head-to-head history and Poisson goal modelling."
     },
 
     teamForm: {
-  home: homeStats,
-  away: awayStats
-},
+      home: homeStats,
+      away: awayStats
+    },
 
-headToHead,
+    headToHead,
+
     probabilities: roundedProbabilities,
 
     recommendations,
 
+    vipRecommendation,
+
     limitations: [
-      "Probabilities are model estimates, not guarantees.",
+      "Probabilities are statistical model estimates, not guarantees.",
+      "Head-to-head influence is limited to reduce the effect of small historical samples.",
       "Recent results may include different competitions.",
       "Injuries, suspensions and confirmed line-ups are not included.",
-      "The model does not use bookmaker odds."
+      "The model does not use bookmaker odds.",
+      "Venue statistics depend on available historical matches."
     ],
 
     generatedAt: new Date().toISOString()
@@ -991,7 +1154,10 @@ app.post("/api/notifications/subscribe", async (req, res) => {
     });
   }
 
-  const token = cleanNotificationText(req.body.token, 4096);
+  const token = cleanNotificationText(
+    req.body.token,
+    4096
+  );
 
   if (!token || token.length < 20) {
     return res.status(400).json({
@@ -1032,7 +1198,10 @@ app.post("/api/notifications/unsubscribe", async (req, res) => {
     });
   }
 
-  const token = cleanNotificationText(req.body.token, 4096);
+  const token = cleanNotificationText(
+    req.body.token,
+    4096
+  );
 
   if (!token) {
     return res.status(400).json({
@@ -1150,7 +1319,10 @@ app.post(
       });
     }
 
-    const token = cleanNotificationText(req.body.token, 4096);
+    const token = cleanNotificationText(
+      req.body.token,
+      4096
+    );
 
     const title = cleanNotificationText(
       req.body.title || "GENERAL FOOTBALL TIPS",
@@ -1253,9 +1425,7 @@ app.post(
       const reservation = await db.runTransaction(async transaction => {
         const existing = await transaction.get(campaignRef);
 
-        if (existing.exists) {
-          return false;
-        }
+        if (existing.exists) return false;
 
         transaction.create(campaignRef, {
           version,
@@ -1351,10 +1521,15 @@ app.post(
       }
 
       await campaignRef.update({
-        status: failed === 0 ? "completed" : "completed_with_errors",
+        status: failed === 0
+          ? "completed"
+          : "completed_with_errors",
+
         sent,
         failed,
-        finishedAt: admin.firestore.FieldValue.serverTimestamp()
+
+        finishedAt:
+          admin.firestore.FieldValue.serverTimestamp()
       });
 
       res.json({
@@ -1379,8 +1554,10 @@ app.post(
           body,
           status: "failed",
           error: error.message,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          updatedAt:
+            admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
+
       } catch (recordError) {
         console.error(
           "Campaign record error:",
@@ -1404,16 +1581,22 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     app: "GENERAL FOOTBALL TIPS V1.0",
+
     apiKeyConfigured: Boolean(API_TOKEN),
     firebaseReady,
     adminPasswordConfigured: Boolean(ADMIN_PASSWORD),
+
     timezone: TIME_ZONE,
+
     queuedRequests: apiQueue.length,
     runningRequest: apiRequestRunning,
+
     cachedFixtures: Boolean(fixtureCache.data),
     cachedAnalyses: analysisCache.size,
     cachedTeams: teamCache.size,
     cachedMatches: matchCache.size,
+    cachedH2H: h2hCache.size,
+
     pendingAnalyses: analysisPending.size
   });
 });
@@ -1476,8 +1659,10 @@ app.get("/api/fixtures", async (req, res) => {
       });
   }
 
+  const request = pendingFixtures;
+
   try {
-    const result = await pendingFixtures;
+    const result = await request;
     res.json(result);
 
   } catch (error) {
@@ -1489,7 +1674,7 @@ app.get("/api/fixtures", async (req, res) => {
     });
 
   } finally {
-    if (pendingFixtures) {
+    if (pendingFixtures === request) {
       pendingFixtures = null;
     }
   }
