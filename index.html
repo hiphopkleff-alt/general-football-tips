@@ -1831,12 +1831,13 @@ function renderRecommendationCard(pick,index){
 
 /* =====================================================
    ANALYSIS PAGE
-   Only two sections:
    1. RECOMMENDATION
    2. TEAM FORM
+   3. HEAD-TO-HEAD
 ===================================================== */
 
 function renderMatchAnalysis(data){
+
  const match=data.match||currentMatch||{};
 
  const homeName=getHome(match);
@@ -1883,6 +1884,8 @@ function renderMatchAnalysis(data){
   `;
  }
 
+ /* MATCH HEADER */
+
  const header=`
   <div class="analysis-match-header">
 
@@ -1912,19 +1915,233 @@ function renderMatchAnalysis(data){
   </div>
  `;
 
+ /* HEAD-TO-HEAD */
+
+ const h2h=data.headToHead||{};
+
+ let h2hHTML='';
+
+ if(h2h.available&&h2h.played>0){
+
+  const meetings=h2h.recentMeetings||[];
+
+  const meetingHTML=meetings.length
+   ?meetings.map(item=>`
+
+     <div style="
+       display:flex;
+       justify-content:space-between;
+       align-items:center;
+       gap:10px;
+       padding:12px;
+       margin-top:8px;
+       background:rgba(255,255,255,.035);
+       border:1px solid rgba(255,255,255,.06);
+       border-radius:10px;
+     ">
+
+      <div style="flex:1;min-width:0">
+
+       <div style="
+         font-size:11px;
+         font-weight:700;
+         color:var(--text);
+         line-height:1.6;
+       ">
+        ${escapeHTML(item.homeTeam||'Unknown')}
+        <span style="color:var(--muted)"> vs </span>
+        ${escapeHTML(item.awayTeam||'Unknown')}
+       </div>
+
+       <div style="
+         font-size:10px;
+         color:var(--muted);
+         margin-top:4px;
+       ">
+        ${escapeHTML(
+         item.date?formatDate(item.date):'Date unavailable'
+        )}
+       </div>
+
+      </div>
+
+      <div style="
+        font-size:17px;
+        font-weight:900;
+        color:var(--green);
+        white-space:nowrap;
+      ">
+       ${Number(item.homeGoals)} - ${Number(item.awayGoals)}
+      </div>
+
+     </div>
+
+    `).join('')
+   :'<div class="empty">No individual meeting results available.</div>';
+
+  h2hHTML=`
+
+   <div class="analysis-section">
+
+    <h3>HEAD-TO-HEAD</h3>
+
+    <div style="
+      font-size:11px;
+      color:var(--muted);
+      margin-bottom:14px;
+    ">
+     Previous meetings between ${escapeHTML(homeName)}
+     and ${escapeHTML(awayName)}
+    </div>
+
+    <div style="
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:8px;
+      margin-bottom:14px;
+    ">
+
+     <div style="
+       background:rgba(53,255,173,.07);
+       border:1px solid rgba(53,255,173,.2);
+       border-radius:10px;
+       padding:12px 5px;
+       text-align:center;
+     ">
+      <div style="font-size:22px;font-weight:900;color:var(--green)">
+       ${Number(h2h.homeWins)||0}
+      </div>
+      <div style="font-size:10px;color:var(--muted)">
+       HOME WINS
+      </div>
+     </div>
+
+     <div style="
+       background:rgba(255,200,87,.07);
+       border:1px solid rgba(255,200,87,.2);
+       border-radius:10px;
+       padding:12px 5px;
+       text-align:center;
+     ">
+      <div style="font-size:22px;font-weight:900;color:var(--yellow)">
+       ${Number(h2h.draws)||0}
+      </div>
+      <div style="font-size:10px;color:var(--muted)">
+       DRAWS
+      </div>
+     </div>
+
+     <div style="
+       background:rgba(37,140,255,.07);
+       border:1px solid rgba(37,140,255,.2);
+       border-radius:10px;
+       padding:12px 5px;
+       text-align:center;
+     ">
+      <div style="font-size:22px;font-weight:900;color:var(--blue)">
+       ${Number(h2h.awayWins)||0}
+      </div>
+      <div style="font-size:10px;color:var(--muted)">
+       AWAY WINS
+      </div>
+     </div>
+
+    </div>
+
+    <div style="
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      padding:13px;
+      background:rgba(255,255,255,.035);
+      border-radius:10px;
+      margin-bottom:14px;
+    ">
+
+     <div>
+      <div style="font-size:10px;color:var(--muted)">
+       TOTAL MEETINGS
+      </div>
+      <div style="font-size:19px;font-weight:900">
+       ${Number(h2h.played)||0}
+      </div>
+     </div>
+
+     <div>
+      <div style="font-size:10px;color:var(--muted)">
+       ${escapeHTML(homeName)} GOALS
+      </div>
+      <div style="font-size:19px;font-weight:900">
+       ${Number(h2h.homeGoals)||0}
+      </div>
+     </div>
+
+     <div>
+      <div style="font-size:10px;color:var(--muted)">
+       ${escapeHTML(awayName)} GOALS
+      </div>
+      <div style="font-size:19px;font-weight:900">
+       ${Number(h2h.awayGoals)||0}
+      </div>
+     </div>
+
+    </div>
+
+    <div style="
+      font-size:12px;
+      font-weight:800;
+      margin-bottom:8px;
+    ">
+     PREVIOUS RESULTS
+    </div>
+
+    ${meetingHTML}
+
+   </div>
+  `;
+
+ }else{
+
+  h2hHTML=`
+
+   <div class="analysis-section">
+
+    <h3>HEAD-TO-HEAD</h3>
+
+    <div class="empty">
+     No previous meeting data is currently available
+     for these two teams.
+    </div>
+
+   </div>
+
+  `;
+ }
+
+ /* DISPLAY ANALYSIS */
+
  $('matchDetails').innerHTML=
+
   header+
 
   `<div class="analysis-section">
     <h3>RECOMMENDATION</h3>
-    <div class="recommendations-list">${recommendationHTML}</div>
+    <div class="recommendations-list">
+     ${recommendationHTML}
+    </div>
    </div>`+
 
   `<div class="analysis-section">
     <h3>TEAM FORM</h3>
     ${renderTeamForm(data.teamForm,homeName,awayName)}
-   </div>`;
+   </div>`+
+
+  h2hHTML;
+
 }
+         
+      
+ 
 
 /* =====================================================
    OPEN MATCH
