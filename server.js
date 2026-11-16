@@ -153,6 +153,8 @@ const fixtureCache = {
 const analysisCache = new Map();
 const teamCache = new Map();
 const matchCache = new Map();
+const h2hCache = new Map();
+const h2hPending = new Map();
 
 const teamPending = new Map();
 const analysisPending = new Map();
