@@ -635,6 +635,144 @@ async function getTeamHistory(teamId, priorityState) {
 
   return request;
 }
+/* =====================================
+   HEAD-TO-HEAD HISTORY
+===================================== */
+
+async function getHeadToHead(matchId, priorityState) {
+  const key = String(matchId);
+
+  const cached = cacheGet(h2hCache, key);
+
+  if (cached) return cached;
+
+  const existing = h2hPending.get(key);
+
+  if (existing) {
+    promoteFootballRequest(
+      existing.endpoint,
+      priorityState.priority
+    );
+
+    return existing.promise;
+  }
+
+  const endpoint =
+    `/matches/${encodeURIComponent(key)}/head2head?limit=10`;
+
+  const request = footballRequest(
+    endpoint,
+    priorityState.priority
+  )
+    .then(data => {
+      const matches = (data.matches || [])
+        .filter(match =>
+          match.status === "FINISHED" &&
+          match.score?.fullTime?.home != null &&
+          match.score?.fullTime?.away != null
+        )
+        .sort((a, b) =>
+          new Date(b.utcDate) - new Date(a.utcDate)
+        );
+
+      const result = {
+        matches
+      };
+
+      cacheSet(h2hCache, key, result, 1440);
+
+      return result;
+    })
+    .finally(() => {
+      h2hPending.delete(key);
+    });
+
+  h2hPending.set(key, {
+    endpoint,
+    promise: request
+  });
+
+  return request;
+}
+
+/* =====================================
+   CALCULATE HEAD-TO-HEAD STATISTICS
+===================================== */
+
+function calculateHeadToHead(matches, homeId, awayId) {
+  const result = {
+    available: false,
+    played: 0,
+
+    homeWins: 0,
+    draws: 0,
+    awayWins: 0,
+
+    homeGoals: 0,
+    awayGoals: 0,
+
+    recentMeetings: []
+  };
+
+  for (const match of matches || []) {
+    const matchHomeId = match.homeTeam?.id;
+    const matchAwayId = match.awayTeam?.id;
+
+    const homeGoals = match.score?.fullTime?.home;
+    const awayGoals = match.score?.fullTime?.away;
+
+    if (
+      !(
+        (matchHomeId === homeId && matchAwayId === awayId) ||
+        (matchHomeId === awayId && matchAwayId === homeId)
+      ) ||
+      homeGoals == null ||
+      awayGoals == null
+    ) {
+      continue;
+    }
+
+    result.played++;
+
+    let goalsFor;
+    let goalsAgainst;
+
+    if (matchHomeId === homeId) {
+      goalsFor = homeGoals;
+      goalsAgainst = awayGoals;
+    } else {
+      goalsFor = awayGoals;
+      goalsAgainst = homeGoals;
+    }
+
+    result.homeGoals += goalsFor;
+    result.awayGoals += goalsAgainst;
+
+    if (goalsFor > goalsAgainst) {
+      result.homeWins++;
+    } else if (goalsFor < goalsAgainst) {
+      result.awayWins++;
+    } else {
+      result.draws++;
+    }
+
+    result.recentMeetings.push({
+      date: match.utcDate,
+
+      homeTeam: match.homeTeam?.name || "Unknown",
+      awayTeam: match.awayTeam?.name || "Unknown",
+
+      homeGoals,
+      awayGoals,
+
+      status: match.status
+    });
+  }
+
+  result.available = result.played > 0;
+
+  return result;
+}
 
 /* =====================================
    MARKET RECOMMENDATIONS
@@ -714,10 +852,27 @@ async function buildMatchAnalysis(matchId, priorityState) {
   const homeId = match.homeTeam.id;
   const awayId = match.awayTeam.id;
 
-  const [homeMatches, awayMatches] = await Promise.all([
+  const [homeMatches, awayMatches, h2hData] =
+  await Promise.all([
     getTeamHistory(homeId, priorityState),
-    getTeamHistory(awayId, priorityState)
+    getTeamHistory(awayId, priorityState),
+
+    getHeadToHead(matchId, priorityState)
+      .catch(error => {
+        console.error(
+          "H2H analysis unavailable:",
+          error.message
+        );
+
+        return { matches: [] };
+      })
   ]);
+
+const headToHead = calculateHeadToHead(
+  h2hData.matches,
+  homeId,
+  awayId
+);
 
   const homeStats = getTeamStats(homeMatches, homeId);
   const awayStats = getTeamStats(awayMatches, awayId);
@@ -807,6 +962,7 @@ async function buildMatchAnalysis(matchId, priorityState) {
     teamForm: {
       home: homeStats,
       away: awayStats
+       headToHead,
     },
 
     probabilities: roundedProbabilities,
