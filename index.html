@@ -1042,19 +1042,28 @@ main{max-width:1120px;padding:12px 15px 22px}
  </div>
 </header>
 
-<div id="firebaseNotificationCard">
-  <button id="toggleFirebaseNotifications" class="firebase-notification-btn" type="button" aria-pressed="false">🔔 Enable notification for updates</button>
-  <div id="firebaseNotificationStatus" aria-live="polite">Notifications are currently disabled.</div>
-</div>
+<div id="firebaseNotificationCard" style="display:none;">
+  <button
+    id="enableFirebaseNotifications"
+    class="firebase-notification-btn">
+    🔔 Enable notification for updates
+  </button>
+
+  <button
+    id="disableFirebaseNotifications"
+    class="firebase-notification-btn"
+    style="display:none;">
+    Notifications enabled · Turn off
+  </button>
+
+  <div id="firebaseNotificationStatus" aria-live="polite">
+    Notifications are currently disabled.
+  </div>
 </div>
 
 <main>
 
 <section class="page active" id="home">
- <div class="home-brand">
-  <div class="home-brand-ball" aria-hidden="true">⚽</div>
-  <div class="home-brand-copy"><h1>GENERAL FOOTBALL TIPS <span>V1.0</span></h1><p>SMART FOOTBALL ANALYSIS</p></div>
- </div>
 
 
  <div class="stats-grid showcase-stats">
@@ -1843,6 +1852,13 @@ async function loadFixtures(force=false){
 
   const data=await apiRequest(url);
 
+  const connectionTarget=$('connectionStatus');
+  if(connectionTarget){
+   connectionTarget.textContent=Array.isArray(data.matches)
+    ?'CONNECTED · '+data.matches.length+' fixtures returned'
+    :'CONNECTED · Fixture format needs checking';
+  }
+
   if(!Array.isArray(data.matches)){
    throw new Error('The API did not return a matches list.');
   }
@@ -1895,6 +1911,8 @@ renderHistory();
 
  }catch(error){
   console.error('Fixture loading error:',error);
+  const connectionTarget=$('connectionStatus');
+  if(connectionTarget)connectionTarget.textContent='NOT CONNECTED · '+error.message;
 
   $('fixtureList').innerHTML=`
    <div class="panel error">
@@ -2526,117 +2544,71 @@ async function buildVIP(forceRefresh=false){
  }
 
  vipBuilding=true;
-
  const button=$('vipRefreshBtn');
-
- if(button){
-  button.disabled=true;
-  button.textContent='ANALYSING...';
- }
+ if(button){button.disabled=true;button.textContent='ANALYSING...';}
 
  const matches=currentFixtures.slice().sort((a,b)=>
   new Date(getMatchDate(a)||0)-new Date(getMatchDate(b)||0)
  );
-
+ const batchSize=4;
  let processed=0;
 
  renderVIP();
-
- $('vipSummary').textContent=
-  `Starting VIP analysis of ${matches.length} matches...`;
+ $('vipSummary').textContent=`Preparing analysis for ${matches.length} matches...`;
 
  try{
-  for(const match of matches){
-
-   /*
-    * Avoid interrupting the analysis page.
-    */
-
+  for(let offset=0;offset<matches.length;offset+=batchSize){
+   /* Pause between batches while the user is viewing a match analysis. */
    while(document.querySelector('.page.active')?.id==='match'){
     await new Promise(resolve=>setTimeout(resolve,800));
    }
 
-   const id=getMatchId(match);
+   const batch=matches.slice(offset,offset+batchSize);
+   const results=await Promise.allSettled(batch.map(async match=>{
+    const id=getMatchId(match);
+    if(id===null)return {match,id:null,data:null};
+    const key=String(id);
+    let data=!forceRefresh?(vipCache.get(key)?.data||null):null;
+    if(!data)data=await fetchAnalysis(match,'background');
+    return {match,id,data};
+   }));
 
-   if(id===null){
+   results.forEach((result,index)=>{
+    const fallbackMatch=batch[index];
+    if(result.status!=='fulfilled'){
+     console.warn('VIP analysis failed for match',getMatchId(fallbackMatch),result.reason);
+     processed++;
+     return;
+    }
+
+    const {match,id,data}=result.value;
     processed++;
-    continue;
-   }
+    if(id===null||!data)return;
 
-   const key=String(id);
-
-   try{
-    let data=null;
-
-    if(!forceRefresh&&vipCache.has(key)){
-     data=vipCache.get(key)?.data||null;
-    }
-
-    if(!data){
-     data=await fetchAnalysis(match,'background');
-    }
-
+    const key=String(id);
     const analysisMatch=data.match||match;
     const live=isLiveMatch(analysisMatch);
     const liveReady=getLiveMode(data);
+    const best=live?(liveReady?getBestRecommendation(data):null):getBestRecommendation(data);
 
-    const best=live
-     ?(liveReady?getBestRecommendation(data):null)
-     :getBestRecommendation(data);
-
-    vipCache.set(key,{
-     data,
-     recommendation:best,
-     probability:best?.probability??null
-    });
-
-    vipEntries=vipEntries.filter(entry=>
-     String(entry.matchId)!==key
-    );
-
+    vipCache.set(key,{data,recommendation:best,probability:best?.probability??null});
+    vipEntries=vipEntries.filter(entry=>String(entry.matchId)!==key);
     if(best){
-     vipEntries.push({
-      match:analysisMatch,
-      matchId:id,
-      recommendation:best,
-      probability:best.probability
-     });
+     vipEntries.push({match:analysisMatch,matchId:id,recommendation:best,probability:best.probability});
     }
+   });
 
-    vipEntries.sort((a,b)=>
-     Number(b.probability)-Number(a.probability)
-    );
-
-    saveVIPResults();
-    renderVIP();
-    renderFixtures(currentFixtures);
-
-   }catch(error){
-    console.warn('VIP analysis failed for match',key,error);
-   }
-
-   processed++;
-
-   $('vipSummary').textContent=
-    `Analysed ${processed} of ${matches.length} matches · ${vipEntries.length} available VIP recommendations`;
-
+   vipEntries.sort((a,b)=>Number(b.probability)-Number(a.probability));
+   saveVIPResults();
    renderVIP();
+   renderFixtures(currentFixtures);
+   $('vipSummary').textContent=`Analysed ${processed} of ${matches.length} matches · ${vipEntries.length} available VIP recommendations`;
   }
 
   vipBuilt=true;
-
-  renderVIP();
-  renderFixtures(currentFixtures);
-
  }finally{
-
   vipBuilding=false;
-
-  if(button){
-   button.disabled=false;
-   button.textContent='REFRESH';
-  }
-
+  if(button){button.disabled=false;button.textContent='REFRESH';}
   renderVIP();
   updateDashboard();
  }
@@ -2892,28 +2864,11 @@ function clearHistory(){
    CONNECTION STATUS
 ===================================================== */
 
-async function checkConnection(){
+function checkConnection(){
  const target=$('connectionStatus');
-
- if(target){
-  target.textContent='Checking connection...';
- }
-
- try{
-  const data=await apiRequest('/api/fixtures');
-
-  if(target){
-   target.textContent=Array.isArray(data.matches)
-    ?'CONNECTED · '+data.matches.length+' fixtures returned'
-    :'CONNECTED · Fixture format needs checking';
-  }
-
- }catch(error){
-
-  if(target){
-   target.textContent='NOT CONNECTED · '+error.message;
-  }
- }
+ if(target)target.textContent='Connecting to football data...';
+ /* loadFixtures() is the single source of truth for connection status.
+    Avoid making a second identical fixtures request at startup. */
 }
 
 /* =====================================================
@@ -3023,143 +2978,255 @@ if('serviceWorker' in navigator){
   color: #d7e7e1 !important;
   border-color: rgba(255,255,255,.2) !important;
 }
-
-/* Restored dashboard identity and accessible notification toggle */
-.home-brand{display:flex;align-items:center;gap:11px;padding:10px 12px;margin:2px 0 4px;border:1px solid rgba(44,164,255,.38);border-radius:14px;background:linear-gradient(105deg,rgba(3,20,53,.96),rgba(5,42,91,.88));box-shadow:0 5px 18px rgba(0,0,0,.25)}
-.home-brand-ball{font-size:38px;line-height:1;filter:drop-shadow(0 0 8px #168bff)}
-.home-brand-copy{min-width:0}.home-brand-copy h1{margin:0;color:#fff;font-size:clamp(17px,4.4vw,29px);font-weight:1000;letter-spacing:-.5px;line-height:1.15}.home-brand-copy h1 span{display:inline-block;margin-left:4px;padding:3px 6px;border:1px solid #ffdc00;border-radius:6px;color:#ffdc00;font-size:10px;vertical-align:middle}.home-brand-copy p{margin:4px 0 0;color:#a9d8ff;font-size:9px;font-weight:800;letter-spacing:1.2px}
-#firebaseNotificationCard{display:flex!important;justify-content:flex-end;width:100%;margin:5px 0 8px;padding:0;background:transparent;border:0;box-shadow:none}
-#firebaseNotificationStatus{display:block!important}
-.firebase-notification-btn{min-height:29px;padding:6px 10px;border:1px solid rgba(53,255,173,.7);border-radius:8px;background:rgba(53,255,173,.12);color:#65ffc0;font-size:10px;font-weight:800;cursor:pointer}
-.firebase-notification-btn[aria-pressed="true"]{background:rgba(255,193,7,.14);border-color:#ffc857;color:#ffdc7a}
-.firebase-notification-btn:disabled{opacity:.65;cursor:wait}
-
 </style>
 
+
+
 <script type="module">
-/* Reliable, user-controlled notification toggle. Firebase loads only when enabling. */
-const GTP_NOTIFICATION_KEY = "gtp_notifications_enabled";
-const GTP_TOKEN_KEY = "gtp_firebase_token";
-const gtpButton = document.getElementById("toggleFirebaseNotifications");
-const gtpCard = document.getElementById("firebaseNotificationCard");
-const gtpStatus = document.getElementById("firebaseNotificationStatus");
 
-function gtpSetStatus(message) {
-  if (gtpStatus) gtpStatus.textContent = message;
+import { initializeApp }
+from "https://www.gstatic.com/firebasejs/13.3.0/firebase-app.js";
+
+import {
+  getMessaging,
+  getToken,
+  deleteToken,
+  onMessage
 }
-function gtpSetEnabled(enabled) {
-  if (!gtpButton) return;
-  gtpButton.setAttribute("aria-pressed", String(enabled));
-  gtpButton.textContent = enabled
-    ? "🔕 Disable notifications"
-    : "🔔 Enable notification for updates";
-  gtpButton.classList.toggle("is-enabled", enabled);
-  localStorage.setItem(GTP_NOTIFICATION_KEY, enabled ? "true" : "false");
+from "https://www.gstatic.com/firebasejs/13.3.0/firebase-messaging.js";
+
+/* FIREBASE CONFIGURATION */
+
+const firebaseConfig = {
+  apiKey: "AIzaSyC29k6H32V4smIJmQbaJpmT8s-9gO-FJ9M",
+  authDomain: "general-football-tips.firebaseapp.com",
+  projectId: "general-football-tips",
+  storageBucket: "general-football-tips.firebasestorage.app",
+  messagingSenderId: "710183231768",
+  appId: "1:710183231768:web:60c490825c687fb9c57e6d"
+};
+
+/* PUBLIC VAPID KEY */
+
+const VAPID_KEY =
+"BE8KtKW0GouXQdfHR-WYvL7xmvG-zgTYd4nK7ktx_IHEHSHfQky9p5wNd0ljAAS8jzor_pZMTBWZT5qkqcUU0rE";
+
+/* INITIALIZE FIREBASE */
+
+const firebaseApp = initializeApp(firebaseConfig);
+const messaging = getMessaging(firebaseApp);
+
+const TOKEN_STORAGE_KEY = "gtp_firebase_token";
+
+const card = document.getElementById(
+  "firebaseNotificationCard"
+);
+
+const enableButton = document.getElementById(
+  "enableFirebaseNotifications"
+);
+
+const disableButton = document.getElementById(
+  "disableFirebaseNotifications"
+);
+
+const statusText = document.getElementById(
+  "firebaseNotificationStatus"
+);
+
+function showStatus(message) {
+  statusText.textContent = message;
 }
 
-if (gtpCard && gtpButton) {
-  gtpCard.style.display = "flex";
-  const home = document.getElementById("home");
-  const homeBrand = home?.querySelector(".home-brand");
-  if (homeBrand) homeBrand.insertAdjacentElement("afterend", gtpCard);
-  else if (home) home.prepend(gtpCard);
+function updateButtons(enabled) {
+  enableButton.style.display = enabled ? "none" : "inline-flex";
+  disableButton.style.display = enabled ? "inline-flex" : "none";
+}
 
-  const wasEnabled = localStorage.getItem(GTP_NOTIFICATION_KEY) === "true" &&
-    !!localStorage.getItem(GTP_TOKEN_KEY) &&
-    ( !('Notification' in window) || Notification.permission === "granted" );
-  gtpSetEnabled(wasEnabled);
-  gtpStatus?.style && (gtpStatus.style.display = "block");
-  gtpStatus?.style && (gtpStatus.style.textAlign = "right");
-  gtpStatus?.style && (gtpStatus.style.fontSize = "11px");
-  gtpStatus?.style && (gtpStatus.style.marginTop = "5px");
-  gtpStatus?.style && (gtpStatus.style.color = "#c7d8e8");
-  gtpSetStatus(wasEnabled ? "Notifications are enabled on this device." : "Notifications are currently disabled.");
+/* SHOW NOTIFICATION CARD ON HOMEPAGE */
 
-  let firebaseMessaging = null;
-  let firebaseDeleteToken = null;
-  let firebaseGetToken = null;
-  async function loadFirebase() {
-    if (firebaseMessaging) return;
-    const appSdk = await import("https://www.gstatic.com/firebasejs/13.3.0/firebase-app.js");
-    const msgSdk = await import("https://www.gstatic.com/firebasejs/13.3.0/firebase-messaging.js");
-    const app = appSdk.initializeApp({
-      apiKey: "AIzaSyC29k6H32V4smIJmQbaJpmT8s-9gO-FJ9M",
-      authDomain: "general-football-tips.firebaseapp.com",
-      projectId: "general-football-tips",
-      storageBucket: "general-football-tips.firebasestorage.app",
-      messagingSenderId: "710183231768",
-      appId: "1:710183231768:web:60c490825c687fb9c57e6d"
-    });
-    firebaseMessaging = msgSdk.getMessaging(app);
-    firebaseDeleteToken = msgSdk.deleteToken;
-    firebaseGetToken = msgSdk.getToken;
+const homePage = document.getElementById("home");
+
+if (homePage) {
+  card.style.display = "block";
+
+  const homeHeader = homePage.querySelector("header");
+
+  if (homeHeader) {
+    homeHeader.insertAdjacentElement("afterend", card);
+  } else {
+    homePage.prepend(card);
+  }
+}
+
+/* SERVICE WORKER */
+
+async function getServiceWorker() {
+  if (!("serviceWorker" in navigator)) {
+    throw new Error("Service workers are not supported.");
   }
 
-  gtpButton.addEventListener("click", async () => {
-    const enabled = gtpButton.getAttribute("aria-pressed") === "true";
-    gtpButton.disabled = true;
-    try {
-      if (enabled) {
-        const token = localStorage.getItem(GTP_TOKEN_KEY);
-        let serverWarning = "";
-        if (token) {
-          try {
-            const response = await fetch("/api/notifications/unsubscribe", {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ token })
-            });
-            if (!response.ok) serverWarning = " Server unsubscribe could not be confirmed.";
-          } catch (_) { serverWarning = " Server unsubscribe could not be reached."; }
-        }
-        try {
-          await loadFirebase();
-          await firebaseDeleteToken(firebaseMessaging);
-        } catch (err) {
-          console.warn("Firebase token cleanup:", err);
-        }
-        localStorage.removeItem(GTP_TOKEN_KEY);
-        gtpSetEnabled(false);
-        gtpSetStatus("Notifications disabled for this app on this device." + serverWarning + " Browser permission may remain allowed; you can enable again anytime.");
-        return;
-      }
-
-      if (!("Notification" in window)) throw new Error("This browser does not support notifications.");
-      if (!("serviceWorker" in navigator)) throw new Error("This browser does not support background notifications.");
-      if (!window.isSecureContext) throw new Error("Notifications require HTTPS. Open the secure https:// app address.");
-
-      let permission = Notification.permission;
-      if (permission === "default") permission = await Notification.requestPermission();
-      if (permission !== "granted") throw new Error("Permission was not granted. Allow notifications for this site in your browser settings, then try again.");
-
-      gtpSetStatus("Connecting notifications…");
-      await loadFirebase();
-      const registration = await navigator.serviceWorker.register("/sw.js");
-      const token = await firebaseGetToken(firebaseMessaging, {
-        vapidKey: "BE8KtKW0GouXQdfHR-WYvL7xmvG-zgTYd4nK7ktx_IHEHSHfQky9p5wNd0ljAAS8jzor_pZMTBWZT5qkqcUU0rE",
-        serviceWorkerRegistration: registration
-      });
-      if (!token) throw new Error("Firebase could not create a device token. Check the messaging service worker and Firebase setup.");
-
-      const response = await fetch("/api/notifications/subscribe", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token })
-      });
-      let result = {};
-      try { result = await response.json(); } catch (_) {}
-      if (!response.ok) throw new Error(result.error || "The server could not save this device subscription.");
-
-      localStorage.setItem(GTP_TOKEN_KEY, token);
-      gtpSetEnabled(true);
-      gtpSetStatus("Notifications enabled successfully on this device.");
-    } catch (error) {
-      console.error("Notification toggle error:", error);
-      gtpSetStatus(error?.message || "Could not update notification settings. Please try again.");
-      if (!enabled) gtpSetEnabled(false);
-    } finally {
-      gtpButton.disabled = false;
-    }
-  });
+  return await navigator.serviceWorker.register("/sw.js");
 }
-</script>
+
+/* SAVE SUBSCRIPTION ON SERVER */
+
+async function saveSubscription(token) {
+  const response = await fetch(
+    "/api/notifications/subscribe",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ token })
+    }
+  );
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      result.error || "Unable to save subscription."
+    );
+  }
+
+  localStorage.setItem(TOKEN_STORAGE_KEY, token);
+
+  return result;
+}
+
+/* ENABLE NOTIFICATIONS */
+
+enableButton.addEventListener("click", async () => {
+  enableButton.disabled = true;
+
+  try {
+    if (!("Notification" in window)) {
+      throw new Error(
+        "Your browser does not support notifications."
+      );
+    }
+
+    showStatus("Requesting notification permission...");
+
+    const permission =
+      await Notification.requestPermission();
+
+    if (permission !== "granted") {
+      throw new Error(
+        "Notification permission was not granted."
+      );
+    }
+
+    showStatus("Connecting to Firebase...");
+
+    const registration = await getServiceWorker();
+
+    const token = await getToken(messaging, {
+      vapidKey: VAPID_KEY,
+      serviceWorkerRegistration: registration
+    });
+
+    if (!token) {
+      throw new Error(
+        "Firebase could not generate a device token."
+      );
+    }
+
+    showStatus("Saving your subscription...");
+
+    await saveSubscription(token);
+
+    updateButtons(true);
+
+    showStatus(
+      "Notifications enabled successfully!"
+    );
+
+  } catch (error) {
+    console.error("Firebase subscription error:", error);
+
+    showStatus(error.message);
+
+  } finally {
+    enableButton.disabled = false;
+  }
+});
+
+/* DISABLE NOTIFICATIONS */
+
+disableButton.addEventListener("click", async () => {
+  disableButton.disabled = true;
+
+  try {
+    const token = localStorage.getItem(
+      TOKEN_STORAGE_KEY
+    );
+
+    if (token) {
+      const response = await fetch(
+        "/api/notifications/unsubscribe",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ token })
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          "Unable to remove server subscription."
+        );
+      }
+    }
+
+    await deleteToken(messaging);
+
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+
+    updateButtons(false);
+
+    showStatus("Notifications disabled.");
+
+  } catch (error) {
+    console.error("Unsubscribe error:", error);
+
+    showStatus(error.message);
+
+  } finally {
+    disableButton.disabled = false;
+  }
+});
+
+/* RESTORE SUBSCRIPTION DISPLAY */
+
+if (
+  localStorage.getItem(TOKEN_STORAGE_KEY) &&
+  Notification.permission === "granted"
+) {
+  updateButtons(true);
+  showStatus("Notifications are enabled on this device.");
+}
+
+/* FOREGROUND NOTIFICATIONS */
+
+onMessage(messaging, payload => {
+  console.log("Firebase foreground message:", payload);
+
+  const title =
+    payload.notification?.title ||
+    "GENERAL FOOTBALL TIPS";
+
+  const body =
+    payload.notification?.body ||
+    "A new update is available.";
+
+  showStatus(title + ": " + body);
+});
+
+</script>is 
 </body>
 </html>
