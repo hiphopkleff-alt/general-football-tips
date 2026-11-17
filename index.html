@@ -3029,7 +3029,7 @@ if('serviceWorker' in navigator){
 .home-brand-ball{font-size:38px;line-height:1;filter:drop-shadow(0 0 8px #168bff)}
 .home-brand-copy{min-width:0}.home-brand-copy h1{margin:0;color:#fff;font-size:clamp(17px,4.4vw,29px);font-weight:1000;letter-spacing:-.5px;line-height:1.15}.home-brand-copy h1 span{display:inline-block;margin-left:4px;padding:3px 6px;border:1px solid #ffdc00;border-radius:6px;color:#ffdc00;font-size:10px;vertical-align:middle}.home-brand-copy p{margin:4px 0 0;color:#a9d8ff;font-size:9px;font-weight:800;letter-spacing:1.2px}
 #firebaseNotificationCard{display:flex!important;justify-content:flex-end;width:100%;margin:5px 0 8px;padding:0;background:transparent;border:0;box-shadow:none}
-#firebaseNotificationStatus{display:none!important}
+#firebaseNotificationStatus{display:block!important}
 .firebase-notification-btn{min-height:29px;padding:6px 10px;border:1px solid rgba(53,255,173,.7);border-radius:8px;background:rgba(53,255,173,.12);color:#65ffc0;font-size:10px;font-weight:800;cursor:pointer}
 .firebase-notification-btn[aria-pressed="true"]{background:rgba(255,193,7,.14);border-color:#ffc857;color:#ffdc7a}
 .firebase-notification-btn:disabled{opacity:.65;cursor:wait}
@@ -3037,213 +3037,129 @@ if('serviceWorker' in navigator){
 </style>
 
 <script type="module">
+/* Reliable, user-controlled notification toggle. Firebase loads only when enabling. */
+const GTP_NOTIFICATION_KEY = "gtp_notifications_enabled";
+const GTP_TOKEN_KEY = "gtp_firebase_token";
+const gtpButton = document.getElementById("toggleFirebaseNotifications");
+const gtpCard = document.getElementById("firebaseNotificationCard");
+const gtpStatus = document.getElementById("firebaseNotificationStatus");
 
-import { initializeApp }
-from "https://www.gstatic.com/firebasejs/13.3.0/firebase-app.js";
-
-import {
-  getMessaging,
-  getToken,
-  deleteToken,
-  onMessage
+function gtpSetStatus(message) {
+  if (gtpStatus) gtpStatus.textContent = message;
 }
-from "https://www.gstatic.com/firebasejs/13.3.0/firebase-messaging.js";
-
-/* FIREBASE CONFIGURATION */
-
-const firebaseConfig = {
-  apiKey: "AIzaSyC29k6H32V4smIJmQbaJpmT8s-9gO-FJ9M",
-  authDomain: "general-football-tips.firebaseapp.com",
-  projectId: "general-football-tips",
-  storageBucket: "general-football-tips.firebasestorage.app",
-  messagingSenderId: "710183231768",
-  appId: "1:710183231768:web:60c490825c687fb9c57e6d"
-};
-
-/* PUBLIC VAPID KEY */
-
-const VAPID_KEY =
-"BE8KtKW0GouXQdfHR-WYvL7xmvG-zgTYd4nK7ktx_IHEHSHfQky9p5wNd0ljAAS8jzor_pZMTBWZT5qkqcUU0rE";
-
-/* INITIALIZE FIREBASE */
-
-const firebaseApp = initializeApp(firebaseConfig);
-const messaging = getMessaging(firebaseApp);
-
-const TOKEN_STORAGE_KEY = "gtp_firebase_token";
-
-const card = document.getElementById(
-  "firebaseNotificationCard"
-);
-
-const toggleButton = document.getElementById(
-  "toggleFirebaseNotifications"
-);
-
-const statusText = document.getElementById(
-  "firebaseNotificationStatus"
-);
-
-function showStatus(message) {
-  statusText.textContent = message;
-}
-
-function updateButtons(enabled) {
-  toggleButton.setAttribute("aria-pressed", String(enabled));
-  toggleButton.textContent = enabled
+function gtpSetEnabled(enabled) {
+  if (!gtpButton) return;
+  gtpButton.setAttribute("aria-pressed", String(enabled));
+  gtpButton.textContent = enabled
     ? "🔕 Disable notifications"
     : "🔔 Enable notification for updates";
+  gtpButton.classList.toggle("is-enabled", enabled);
+  localStorage.setItem(GTP_NOTIFICATION_KEY, enabled ? "true" : "false");
 }
 
-/* SHOW NOTIFICATION CARD ON HOMEPAGE */
+if (gtpCard && gtpButton) {
+  gtpCard.style.display = "flex";
+  const home = document.getElementById("home");
+  const homeBrand = home?.querySelector(".home-brand");
+  if (homeBrand) homeBrand.insertAdjacentElement("afterend", gtpCard);
+  else if (home) home.prepend(gtpCard);
 
-const homePage = document.getElementById("home");
+  const wasEnabled = localStorage.getItem(GTP_NOTIFICATION_KEY) === "true" &&
+    !!localStorage.getItem(GTP_TOKEN_KEY) &&
+    ( !('Notification' in window) || Notification.permission === "granted" );
+  gtpSetEnabled(wasEnabled);
+  gtpStatus?.style && (gtpStatus.style.display = "block");
+  gtpStatus?.style && (gtpStatus.style.textAlign = "right");
+  gtpStatus?.style && (gtpStatus.style.fontSize = "11px");
+  gtpStatus?.style && (gtpStatus.style.marginTop = "5px");
+  gtpStatus?.style && (gtpStatus.style.color = "#c7d8e8");
+  gtpSetStatus(wasEnabled ? "Notifications are enabled on this device." : "Notifications are currently disabled.");
 
-if (homePage) {
-  card.style.display = "block";
-
-  const homeBrand = homePage.querySelector(".home-brand");
-  if (homeBrand) homeBrand.insertAdjacentElement("afterend", card);
-  else homePage.prepend(card);
-}
-
-/* SERVICE WORKER */
-
-async function getServiceWorker() {
-  if (!("serviceWorker" in navigator)) {
-    throw new Error("Service workers are not supported.");
-  }
-
-  return await navigator.serviceWorker.register("/sw.js");
-}
-
-/* SAVE SUBSCRIPTION ON SERVER */
-
-async function saveSubscription(token) {
-  const response = await fetch(
-    "/api/notifications/subscribe",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ token })
-    }
-  );
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      result.error || "Unable to save subscription."
-    );
-  }
-
-  localStorage.setItem(TOKEN_STORAGE_KEY, token);
-
-  return result;
-}
-
-/* ENABLE NOTIFICATIONS */
-
-toggleButton.addEventListener("click", async () => {
-  const currentlyEnabled = toggleButton.getAttribute("aria-pressed") === "true";
-  toggleButton.disabled = true;
-
-  try {
-    if (currentlyEnabled) {
-      const token = localStorage.getItem(TOKEN_STORAGE_KEY);
-      if (token) {
-        const response = await fetch("/api/notifications/unsubscribe", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token })
-        });
-        if (!response.ok) throw new Error("Unable to remove the server subscription. Please try again.");
-      }
-      await deleteToken(messaging);
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-      updateButtons(false);
-      showStatus("Notifications disabled for this app. Browser permission remains granted; you can enable notifications again anytime.");
-      return;
-    }
-
-    if (!("Notification" in window)) {
-      throw new Error(
-        "Your browser does not support notifications."
-      );
-    }
-
-    showStatus("Requesting notification permission...");
-
-    const permission =
-      await Notification.requestPermission();
-
-    if (permission !== "granted") {
-      throw new Error(
-        "Notification permission was not granted."
-      );
-    }
-
-    showStatus("Connecting to Firebase...");
-
-    const registration = await getServiceWorker();
-
-    const token = await getToken(messaging, {
-      vapidKey: VAPID_KEY,
-      serviceWorkerRegistration: registration
+  let firebaseMessaging = null;
+  let firebaseDeleteToken = null;
+  let firebaseGetToken = null;
+  async function loadFirebase() {
+    if (firebaseMessaging) return;
+    const appSdk = await import("https://www.gstatic.com/firebasejs/13.3.0/firebase-app.js");
+    const msgSdk = await import("https://www.gstatic.com/firebasejs/13.3.0/firebase-messaging.js");
+    const app = appSdk.initializeApp({
+      apiKey: "AIzaSyC29k6H32V4smIJmQbaJpmT8s-9gO-FJ9M",
+      authDomain: "general-football-tips.firebaseapp.com",
+      projectId: "general-football-tips",
+      storageBucket: "general-football-tips.firebasestorage.app",
+      messagingSenderId: "710183231768",
+      appId: "1:710183231768:web:60c490825c687fb9c57e6d"
     });
-
-    if (!token) {
-      throw new Error(
-        "Firebase could not generate a device token."
-      );
-    }
-
-    showStatus("Saving your subscription...");
-
-    await saveSubscription(token);
-
-    updateButtons(true);
-
-    showStatus(
-      "Notifications enabled successfully!"
-    );
-
-  } catch (error) {
-    console.error("Firebase subscription error:", error);
-
-    showStatus(error.message);
-
-  } finally {
-    toggleButton.disabled = false;
+    firebaseMessaging = msgSdk.getMessaging(app);
+    firebaseDeleteToken = msgSdk.deleteToken;
+    firebaseGetToken = msgSdk.getToken;
   }
-});
 
-/* RESTORE SUBSCRIPTION DISPLAY */
+  gtpButton.addEventListener("click", async () => {
+    const enabled = gtpButton.getAttribute("aria-pressed") === "true";
+    gtpButton.disabled = true;
+    try {
+      if (enabled) {
+        const token = localStorage.getItem(GTP_TOKEN_KEY);
+        let serverWarning = "";
+        if (token) {
+          try {
+            const response = await fetch("/api/notifications/unsubscribe", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token })
+            });
+            if (!response.ok) serverWarning = " Server unsubscribe could not be confirmed.";
+          } catch (_) { serverWarning = " Server unsubscribe could not be reached."; }
+        }
+        try {
+          await loadFirebase();
+          await firebaseDeleteToken(firebaseMessaging);
+        } catch (err) {
+          console.warn("Firebase token cleanup:", err);
+        }
+        localStorage.removeItem(GTP_TOKEN_KEY);
+        gtpSetEnabled(false);
+        gtpSetStatus("Notifications disabled for this app on this device." + serverWarning + " Browser permission may remain allowed; you can enable again anytime.");
+        return;
+      }
 
-if ("Notification" in window && localStorage.getItem(TOKEN_STORAGE_KEY) && Notification.permission === "granted") {
-  updateButtons(true);
-  showStatus("Notifications are enabled for this app.");
-} else {
-  updateButtons(false);
+      if (!("Notification" in window)) throw new Error("This browser does not support notifications.");
+      if (!("serviceWorker" in navigator)) throw new Error("This browser does not support background notifications.");
+      if (!window.isSecureContext) throw new Error("Notifications require HTTPS. Open the secure https:// app address.");
+
+      let permission = Notification.permission;
+      if (permission === "default") permission = await Notification.requestPermission();
+      if (permission !== "granted") throw new Error("Permission was not granted. Allow notifications for this site in your browser settings, then try again.");
+
+      gtpSetStatus("Connecting notifications…");
+      await loadFirebase();
+      const registration = await navigator.serviceWorker.register("/sw.js");
+      const token = await firebaseGetToken(firebaseMessaging, {
+        vapidKey: "BE8KtKW0GouXQdfHR-WYvL7xmvG-zgTYd4nK7ktx_IHEHSHfQky9p5wNd0ljAAS8jzor_pZMTBWZT5qkqcUU0rE",
+        serviceWorkerRegistration: registration
+      });
+      if (!token) throw new Error("Firebase could not create a device token. Check the messaging service worker and Firebase setup.");
+
+      const response = await fetch("/api/notifications/subscribe", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token })
+      });
+      let result = {};
+      try { result = await response.json(); } catch (_) {}
+      if (!response.ok) throw new Error(result.error || "The server could not save this device subscription.");
+
+      localStorage.setItem(GTP_TOKEN_KEY, token);
+      gtpSetEnabled(true);
+      gtpSetStatus("Notifications enabled successfully on this device.");
+    } catch (error) {
+      console.error("Notification toggle error:", error);
+      gtpSetStatus(error?.message || "Could not update notification settings. Please try again.");
+      if (!enabled) gtpSetEnabled(false);
+    } finally {
+      gtpButton.disabled = false;
+    }
+  });
 }
-
-/* FOREGROUND NOTIFICATIONS */
-
-onMessage(messaging, payload => {
-  console.log("Firebase foreground message:", payload);
-
-  const title =
-    payload.notification?.title ||
-    "GENERAL FOOTBALL TIPS";
-
-  const body =
-    payload.notification?.body ||
-    "A new update is available.";
-
-  showStatus(title + ": " + body);
-});
-
-</script>is 
+</script>
 </body>
 </html>
