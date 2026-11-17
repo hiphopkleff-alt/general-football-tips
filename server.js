@@ -1,1781 +1,1021 @@
-"use strict";
+'use strict';
 
-const express = require("express");
-const path = require("path");
-const fs = require("fs");
-const crypto = require("crypto");
-const admin = require("firebase-admin");
+const express = require('express');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
+const API_TOKEN = process.env.API_FOOTBALL_KEY;
+const API_BASE = 'https://v3.football.api-sports.io';
+const API_REQUEST_INTERVAL = 6500;
+const FIXTURE_PAGES = 2;
+const FIXTURE_CACHE_TTL = 2 * 60 * 60 * 1000;
+const ANALYSIS_CACHE_TTL = 6 * 60 * 60 * 1000;
+const TEAM_CACHE_TTL = 24 * 60 * 60 * 1000;
+const MATCH_CACHE_TTL = 5 * 60 * 1000;
+const LIVE_MATCH_CACHE_TTL = 60 * 1000;
 
-const API_TOKEN = process.env.FOOTBALL_DATA_TOKEN;
-const API_BASE = "https://api.football-data.org/v4";
-const TIME_ZONE = "Africa/Lagos";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-
-app.disable("x-powered-by");
-app.use(express.json({ limit: "100kb" }));
+app.use(express.json());
 app.use(express.static(__dirname));
 
-/* =====================================
-   FIREBASE ADMIN CONNECTION
-===================================== */
-
-let firebaseReady = false;
-let db = null;
-let messaging = null;
-
-try {
-  const serviceAccountPath =
-    "/etc/secrets/firebase-service-account.json";
-
-  const serviceAccount = JSON.parse(
-    fs.readFileSync(serviceAccountPath, "utf8")
-  );
-
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-  });
-
-  db = admin.firestore();
-  messaging = admin.messaging();
-
-  firebaseReady = true;
-
-  console.log("Firebase notification system connected.");
-
-} catch (error) {
-  console.error(
-    "Firebase initialization failed:",
-    error.message
-  );
-}
-
-/* =====================================
-   ADMIN AUTHENTICATION
-===================================== */
-
-const adminSessions = new Map();
-
-const ADMIN_SESSION_DURATION =
-  8 * 60 * 60 * 1000;
-
-function safeCompare(first, second) {
-  const a = Buffer.from(String(first || ""));
-  const b = Buffer.from(String(second || ""));
-
-  if (a.length !== b.length) return false;
-
-  return crypto.timingSafeEqual(a, b);
-}
-
-function createAdminSession() {
-  const token = crypto.randomBytes(48).toString("hex");
-
-  adminSessions.set(token, {
-    expiresAt: Date.now() + ADMIN_SESSION_DURATION
-  });
-
-  return token;
-}
-
-function requireAdmin(req, res, next) {
-  const authorization = req.headers.authorization || "";
-
-  const token = authorization.startsWith("Bearer ")
-    ? authorization.slice(7)
-    : "";
-
-  const session = adminSessions.get(token);
-
-  if (!session || Date.now() > session.expiresAt) {
-    if (token) adminSessions.delete(token);
-
-    return res.status(401).json({
-      error: "Administrator authentication required."
-    });
-  }
-
-  next();
-}
-
-/* =====================================
-   NOTIFICATION HELPERS
-===================================== */
-
-function hashToken(token) {
-  return crypto
-    .createHash("sha256")
-    .update(token)
-    .digest("hex");
-}
-
-function notificationErrorIsInvalidToken(error) {
-  return [
-    "messaging/registration-token-not-registered",
-    "messaging/invalid-registration-token"
-  ].includes(error?.code);
-}
-
-function cleanNotificationText(value, maxLength) {
-  return String(value || "")
-    .trim()
-    .slice(0, maxLength);
-}
-
-async function getSubscriberCount() {
-  const snapshot = await db
-    .collection("notificationSubscribers")
-    .get();
-
-  return snapshot.size;
-}
-
-/* =====================================
-   CACHE STORAGE
-===================================== */
-
-const fixtureCache = {
-  data: null,
-  expiresAt: 0,
-  dateFrom: null,
-  dateTo: null
-};
-
+const fixtureCache = { value: null, at: 0 };
 const analysisCache = new Map();
 const teamCache = new Map();
 const matchCache = new Map();
-const h2hCache = new Map();
-
 const teamPending = new Map();
-const h2hPending = new Map();
 const analysisPending = new Map();
+const matchPending = new Map();
 
-let pendingFixtures = null;
-
-/* =====================================
-   API REQUEST QUEUE
-===================================== */
-
-const API_REQUEST_INTERVAL = 6500;
-
-const apiQueue = [];
-const apiPendingRequests = new Map();
-
-let apiQueueTimer = null;
-let apiRequestRunning = false;
+let apiQueue = [];
+let queueRunning = false;
 let lastApiRequestAt = 0;
-let queueSequence = 0;
+let queuedRequests = 0;
+let runningRequest = false;
 
-function priorityWeight(priority) {
-  if (priority === "high") return 0;
-  if (priority === "normal") return 1;
-  return 2;
+const LIVE_STATUSES = new Set([
+  'IN_PLAY', 'PAUSED', 'EXTRA_TIME', 'PENALTY_SHOOTOUT'
+]);
+
+const FINISHED_STATUSES = new Set(['FINISHED', 'AWARDED']);
+
+const UNAVAILABLE_STATUSES = new Set([
+  'POSTPONED', 'CANCELLED', 'ABANDONED', 'SUSPENDED', 'DELAYED'
+]);
+
+function now() {
+  return Date.now();
 }
 
-function normalizePriority(priority) {
-  if (priority === "high") return "high";
-  if (priority === "normal") return "normal";
-  return "background";
+function isLiveStatus(status) {
+  return LIVE_STATUSES.has(String(status || '').toUpperCase());
 }
 
-function promoteFootballRequest(endpoint, priority) {
-  const task = apiPendingRequests.get(endpoint);
+function cacheGet(map, key, ttl) {
+  const item = map.get(String(key));
 
-  if (!task || task.state !== "queued") return;
-
-  if (
-    priorityWeight(priority) <
-    priorityWeight(task.priority)
-  ) {
-    task.priority = priority;
-
-    if (apiQueueTimer) {
-      clearTimeout(apiQueueTimer);
-      apiQueueTimer = null;
-    }
-
-    processApiQueue();
-  }
-}
-
-function processApiQueue() {
-  if (
-    apiRequestRunning ||
-    apiQueueTimer ||
-    !apiQueue.length
-  ) {
-    return;
-  }
-
-  const wait = Math.max(
-    0,
-    API_REQUEST_INTERVAL - (Date.now() - lastApiRequestAt)
-  );
-
-  apiQueueTimer = setTimeout(async () => {
-    apiQueueTimer = null;
-
-    if (apiRequestRunning || !apiQueue.length) {
-      processApiQueue();
-      return;
-    }
-
-    apiQueue.sort((a, b) => {
-      const difference =
-        priorityWeight(a.priority) -
-        priorityWeight(b.priority);
-
-      return difference || a.sequence - b.sequence;
-    });
-
-    const task = apiQueue.shift();
-
-    if (!task) return;
-
-    task.state = "running";
-    apiRequestRunning = true;
-    lastApiRequestAt = Date.now();
-
-    try {
-      console.log(
-        "Football API:",
-        task.endpoint,
-        "| Priority:",
-        task.priority
-      );
-
-      const response = await fetch(
-        API_BASE + task.endpoint,
-        {
-          method: "GET",
-          headers: {
-            "X-Auth-Token": API_TOKEN,
-            "Accept": "application/json"
-          },
-          signal: AbortSignal.timeout(25000)
-        }
-      );
-
-      if (!response.ok) {
-        const body = await response.text();
-
-        const error = new Error(
-          `Football API HTTP ${response.status}: ${body}`
-        );
-
-        error.status = response.status;
-        throw error;
-      }
-
-      task.resolve(await response.json());
-
-    } catch (error) {
-      task.reject(error);
-
-    } finally {
-      if (apiPendingRequests.get(task.endpoint) === task) {
-        apiPendingRequests.delete(task.endpoint);
-      }
-
-      apiRequestRunning = false;
-      processApiQueue();
-    }
-
-  }, wait);
-}
-
-function footballRequest(endpoint, priority = "background") {
-  priority = normalizePriority(priority);
-
-  if (!API_TOKEN) {
-    return Promise.reject(
-      new Error("FOOTBALL_DATA_TOKEN is not configured.")
-    );
-  }
-
-  const existing = apiPendingRequests.get(endpoint);
-
-  if (existing) {
-    promoteFootballRequest(endpoint, priority);
-    return existing.promise;
-  }
-
-  let resolveRequest;
-  let rejectRequest;
-
-  const promise = new Promise((resolve, reject) => {
-    resolveRequest = resolve;
-    rejectRequest = reject;
-  });
-
-  const task = {
-    endpoint,
-    priority,
-    state: "queued",
-    sequence: queueSequence++,
-    promise,
-    resolve: resolveRequest,
-    reject: rejectRequest
-  };
-
-  apiPendingRequests.set(endpoint, task);
-  apiQueue.push(task);
-
-  processApiQueue();
-
-  return promise;
-}
-
-/* =====================================
-   NIGERIA DATE RANGE
-===================================== */
-
-function getNigeriaDate() {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(new Date());
-
-  const values = {};
-
-  for (const part of parts) {
-    values[part.type] = part.value;
-  }
-
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-function addDays(dateString, days) {
-  const date = new Date(`${dateString}T12:00:00Z`);
-
-  date.setUTCDate(date.getUTCDate() + days);
-
-  return date.toISOString().slice(0, 10);
-}
-
-function getFixtureDateRange() {
-  const dateFrom = getNigeriaDate();
-
-  return {
-    dateFrom,
-    dateTo: addDays(dateFrom, 7)
-  };
-}
-
-/* =====================================
-   CACHE HELPERS
-===================================== */
-
-function cacheGet(cache, key) {
-  const item = cache.get(key);
-
-  if (!item || Date.now() > item.expiresAt) {
-    cache.delete(key);
+  if (!item || now() - item.at > ttl) {
     return null;
   }
 
-  return item.data;
+  return item.value;
 }
 
-function cacheSet(cache, key, data, minutes) {
-  cache.set(key, {
-    data,
-    expiresAt: Date.now() + minutes * 60 * 1000
+function cacheSet(map, key, value) {
+  map.set(String(key), { value, at: now() });
+  return value;
+}
+
+function priorityWeight(priority) {
+  const p = String(priority || 'background').toLowerCase();
+
+  return p === 'high' || p === 'urgent'
+    ? 0
+    : p === 'normal'
+      ? 1
+      : 2;
+}
+
+function normalizePriority(priority) {
+  return priorityWeight(priority) === 0
+    ? 'high'
+    : priorityWeight(priority) === 1
+      ? 'normal'
+      : 'background';
+}
+
+function promoteFootballRequest(task, priority) {
+  if (priorityWeight(priority) < task.weight && !task.started) {
+    task.weight = priorityWeight(priority);
+
+    apiQueue.sort(
+      (a, b) => a.weight - b.weight || a.createdAt - b.createdAt
+    );
+  }
+}
+
+async function processApiQueue() {
+  if (queueRunning) return;
+
+  queueRunning = true;
+
+  try {
+    while (apiQueue.length) {
+      apiQueue.sort(
+        (a, b) => a.weight - b.weight || a.createdAt - b.createdAt
+      );
+
+      const task = apiQueue.shift();
+
+      const wait = Math.max(
+        0,
+        API_REQUEST_INTERVAL - (now() - lastApiRequestAt)
+      );
+
+      if (wait) {
+        await new Promise(resolve => setTimeout(resolve, wait));
+      }
+
+      task.started = true;
+      runningRequest = true;
+
+      try {
+        task.resolve(await task.run());
+      } catch (error) {
+        task.reject(error);
+      } finally {
+        lastApiRequestAt = now();
+        runningRequest = false;
+        queuedRequests = apiQueue.length;
+      }
+    }
+  } finally {
+    queueRunning = false;
+    queuedRequests = apiQueue.length;
+  }
+}
+
+function footballRequest(endpoint, priority = 'background') {
+  if (!API_TOKEN) {
+    return Promise.reject(
+      new Error('API_FOOTBALL_KEY is not configured in Render.')
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const task = {
+      endpoint,
+      weight: priorityWeight(priority),
+      createdAt: now(),
+      started: false,
+      resolve,
+      reject,
+
+      run: async () => {
+        const response = await fetch(API_BASE + endpoint, {
+          method: 'GET',
+          headers: {
+            'x-apisports-key': API_TOKEN,
+            Accept: 'application/json'
+          }
+        });
+
+        const body = await response.json().catch(() => ({}));
+
+        if (
+          !response.ok ||
+          (body.errors && Object.keys(body.errors).length)
+        ) {
+          const detail =
+            body.message ||
+            (
+              typeof body.errors === 'object'
+                ? JSON.stringify(body.errors)
+                : body.errors
+            );
+
+          const error = new Error(
+            detail || `API-Football returned HTTP ${response.status}`
+          );
+
+          error.status = response.status || 502;
+          throw error;
+        }
+
+        return body;
+      }
+    };
+
+    apiQueue.push(task);
+    queuedRequests = apiQueue.length;
+
+    processApiQueue();
   });
 }
 
-/* =====================================
-   MATCH INFORMATION
-===================================== */
+function poisson(lambda, k) {
+  if (k < 0) return 0;
 
-function saveFixtureMatches(matches) {
-  for (const match of matches || []) {
-    if (!match?.id) continue;
+  let factorial = 1;
 
-    cacheSet(
-      matchCache,
-      String(match.id),
-      match,
-      60
-    );
-  }
-}
-
-async function getMatchInformation(matchId, priorityState) {
-  const key = String(matchId);
-
-  const cached = cacheGet(matchCache, key);
-
-  if (cached) return cached;
-
-  const match = await footballRequest(
-    `/matches/${encodeURIComponent(key)}`,
-    priorityState.priority
-  );
-
-  cacheSet(matchCache, key, match, 60);
-
-  return match;
-}
-
-/* =====================================
-   POISSON MODEL
-===================================== */
-
-function poisson(lambda, goals) {
-  if (!Number.isFinite(lambda) || lambda < 0) {
-    return 0;
+  for (let i = 2; i <= k; i++) {
+    factorial *= i;
   }
 
-  let probability = Math.exp(-lambda);
-
-  for (let i = 1; i <= goals; i++) {
-    probability *= lambda / i;
-  }
-
-  return probability;
+  return Math.exp(-lambda) * Math.pow(lambda, k) / factorial;
 }
 
-function calculateProbabilities(homeXG, awayXG) {
-  let home = 0;
+function poissonDistribution(lambda, max = 10) {
+  const values = [];
+
+  for (let i = 0; i <= max; i++) {
+    values.push(poisson(lambda, i));
+  }
+
+  const sum = values.reduce((a, b) => a + b, 0);
+
+  return values.map(v => v / (sum || 1));
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function percent(n) {
+  return Math.round(clamp(n, 0, 1) * 1000) / 10;
+}
+
+function marketProbabilities(lambdaHome, lambdaAway) {
+  const home = poissonDistribution(lambdaHome, 10);
+  const away = poissonDistribution(lambdaAway, 10);
+
+  let homeWin = 0;
   let draw = 0;
-  let away = 0;
-
-  let over05 = 0;
-  let over15 = 0;
-  let over25 = 0;
-  let over35 = 0;
-
+  let awayWin = 0;
   let bttsYes = 0;
 
-  const maxGoals = 12;
+  const totals = Array(22).fill(0);
 
-  for (let h = 0; h <= maxGoals; h++) {
-    for (let a = 0; a <= maxGoals; a++) {
-      const probability =
-        poisson(homeXG, h) *
-        poisson(awayXG, a);
+  for (let h = 0; h < home.length; h++) {
+    for (let a = 0; a < away.length; a++) {
+      const p = home[h] * away[a];
 
-      if (h > a) home += probability;
-      else if (h === a) draw += probability;
-      else away += probability;
+      if (h > a) homeWin += p;
+      else if (h === a) draw += p;
+      else awayWin += p;
 
-      const total = h + a;
+      if (h > 0 && a > 0) bttsYes += p;
 
-      if (total >= 1) over05 += probability;
-      if (total >= 2) over15 += probability;
-      if (total >= 3) over25 += probability;
-      if (total >= 4) over35 += probability;
-
-      if (h > 0 && a > 0) {
-        bttsYes += probability;
-      }
+      totals[h + a] += p;
     }
   }
 
+  const over = threshold =>
+    totals.slice(threshold + 1).reduce((a, b) => a + b, 0);
+
+  const under = threshold => 1 - over(threshold);
+
   return {
-    homeWin: home * 100,
-    draw: draw * 100,
-    awayWin: away * 100,
-
-    doubleChance1X: (home + draw) * 100,
-    doubleChanceX2: (draw + away) * 100,
-    doubleChance12: (home + away) * 100,
-
-    over05: over05 * 100,
-    under05: (1 - over05) * 100,
-
-    over15: over15 * 100,
-    under15: (1 - over15) * 100,
-
-    over25: over25 * 100,
-    under25: (1 - over25) * 100,
-
-    over35: over35 * 100,
-    under35: (1 - over35) * 100,
-
-    bttsYes: bttsYes * 100,
-    bttsNo: (1 - bttsYes) * 100
+    homeWin: percent(homeWin),
+    draw: percent(draw),
+    awayWin: percent(awayWin),
+    doubleChance1X: percent(homeWin + draw),
+    doubleChanceX2: percent(draw + awayWin),
+    doubleChance12: percent(homeWin + awayWin),
+    over05: percent(over(0)),
+    under05: percent(under(0)),
+    over15: percent(over(1)),
+    under15: percent(under(1)),
+    over25: percent(over(2)),
+    under25: percent(under(2)),
+    over35: percent(over(3)),
+    under35: percent(under(3)),
+    bttsYes: percent(bttsYes),
+    bttsNo: percent(1 - bttsYes)
   };
 }
 
-/* =====================================
-   TEAM STATISTICS
-===================================== */
+function makeRecommendations(probabilities) {
+  const labels = {
+    homeWin: 'HOME WIN (1)',
+    draw: 'DRAW (X)',
+    awayWin: 'AWAY WIN (2)',
+    doubleChance1X: 'DOUBLE CHANCE 1X',
+    doubleChanceX2: 'DOUBLE CHANCE X2',
+    doubleChance12: 'DOUBLE CHANCE 12',
+    over05: 'OVER 0.5 GOALS',
+    under05: 'UNDER 0.5 GOALS',
+    over15: 'OVER 1.5 GOALS',
+    under15: 'UNDER 1.5 GOALS',
+    over25: 'OVER 2.5 GOALS',
+    under25: 'UNDER 2.5 GOALS',
+    over35: 'OVER 3.5 GOALS',
+    under35: 'UNDER 3.5 GOALS',
+    bttsYes: 'BTTS YES',
+    bttsNo: 'BTTS NO'
+  };
 
-function getTeamStats(matches, teamId) {
-  const finished = (matches || [])
-    .filter(match =>
-      match.status === "FINISHED" &&
-      match.score?.fullTime?.home != null &&
-      match.score?.fullTime?.away != null
-    )
-    .sort((a, b) =>
-      new Date(b.utcDate) - new Date(a.utcDate)
-    );
+  return Object.entries(probabilities)
+    .map(([key, probability]) => ({
+      market: labels[key] || key,
+      key,
+      probability
+    }))
+    .sort((a, b) => b.probability - a.probability);
+}
 
-  const recent = finished.slice(0, 10);
+function getScoreNumbers(match) {
+  const score = match?.score || {};
+  const running = score.fullTime || score.fulltime || {};
 
-  const homeMatches = finished
-    .filter(match => match.homeTeam?.id === teamId)
-    .slice(0, 10);
+  const home =
+    running.home ??
+    running.homeTeam ??
+    score.home ??
+    score.homeTeam;
 
-  const awayMatches = finished
-    .filter(match => match.awayTeam?.id === teamId)
-    .slice(0, 10);
+  const away =
+    running.away ??
+    running.awayTeam ??
+    score.away ??
+    score.awayTeam;
 
-  function calculateGroup(group) {
-    let played = 0;
-    let wins = 0;
-    let draws = 0;
-    let losses = 0;
-    let goalsFor = 0;
-    let goalsAgainst = 0;
+  return {
+    home: Number.isInteger(home)
+      ? home
+      : Number.isFinite(Number(home))
+        ? Number(home)
+        : null,
 
-    const form = [];
+    away: Number.isInteger(away)
+      ? away
+      : Number.isFinite(Number(away))
+        ? Number(away)
+        : null
+  };
+}
 
-    for (const match of group) {
-      const isHome = match.homeTeam?.id === teamId;
+function getValidMinute(match) {
+  const raw = match?.minute;
 
-      const scored = isHome
-        ? match.score.fullTime.home
-        : match.score.fullTime.away;
+  if (Number.isInteger(raw) && raw >= 0 && raw <= 130) {
+    return raw;
+  }
 
-      const conceded = isHome
-        ? match.score.fullTime.away
-        : match.score.fullTime.home;
+  return null;
+}
 
-      played++;
-      goalsFor += scored;
-      goalsAgainst += conceded;
+function liveProbabilityModel(preHomeXG, preAwayXG, match) {
+  const status = String(match?.status || '').toUpperCase();
+  const score = getScoreNumbers(match);
+  const minute = getValidMinute(match);
 
-      if (scored > conceded) {
-        wins++;
-        form.push("W");
-      } else if (scored === conceded) {
-        draws++;
-        form.push("D");
-      } else {
-        losses++;
-        form.push("L");
-      }
-    }
-
+  if (!isLiveStatus(status)) {
     return {
-      played,
-      wins,
-      draws,
-      losses,
-      goalsFor,
-      goalsAgainst,
-      averageGoalsFor: played ? goalsFor / played : 0,
-      averageGoalsAgainst: played ? goalsAgainst / played : 0,
-      form
+      available: false,
+      reason: 'Match is not currently live.'
     };
   }
 
-  const overall = calculateGroup(recent);
-  const home = calculateGroup(homeMatches);
-  const away = calculateGroup(awayMatches);
-
-  return {
-    ...overall,
-    home,
-    away
-  };
-}
-
-/* =====================================
-   TEAM HISTORY
-===================================== */
-
-async function getTeamHistory(teamId, priorityState) {
-  const key = String(teamId);
-
-  const cached = cacheGet(teamCache, key);
-
-  if (cached) return cached;
-
-  const existing = teamPending.get(key);
-
-  if (existing) {
-    promoteFootballRequest(
-      existing.endpoint,
-      priorityState.priority
-    );
-
-    return existing.promise;
+  if (minute === null) {
+    return {
+      available: false,
+      reason: 'The data provider has not supplied a reliable match minute.'
+    };
   }
 
-  const endpoint =
-    `/teams/${encodeURIComponent(key)}/matches?status=FINISHED&limit=30`;
-
-  const request = footballRequest(
-    endpoint,
-    priorityState.priority
-  )
-    .then(data => {
-      const matches = (data.matches || [])
-        .filter(match =>
-          match.status === "FINISHED" &&
-          match.score?.fullTime?.home != null &&
-          match.score?.fullTime?.away != null
-        )
-        .sort((a, b) =>
-          new Date(b.utcDate) - new Date(a.utcDate)
-        );
-
-      cacheSet(teamCache, key, matches, 60);
-
-      return matches;
-    })
-    .finally(() => {
-      teamPending.delete(key);
-    });
-
-  teamPending.set(key, {
-    endpoint,
-    promise: request
-  });
-
-  return request;
-}
-
-/* =====================================
-   HEAD-TO-HEAD HISTORY
-===================================== */
-
-async function getHeadToHead(matchId, priorityState) {
-  const key = String(matchId);
-
-  const cached = cacheGet(h2hCache, key);
-
-  if (cached) return cached;
-
-  const existing = h2hPending.get(key);
-
-  if (existing) {
-    promoteFootballRequest(
-      existing.endpoint,
-      priorityState.priority
-    );
-
-    return existing.promise;
+  if (score.home === null || score.away === null) {
+    return {
+      available: false,
+      reason: 'A reliable live score is not available.'
+    };
   }
 
-  const endpoint =
-    `/matches/${encodeURIComponent(key)}/head2head?limit=10`;
+  const duration =
+    match?.score?.duration === 'EXTRA_TIME' ||
+    status === 'EXTRA_TIME'
+      ? 120
+      : 90;
 
-  const request = footballRequest(
-    endpoint,
-    priorityState.priority
-  )
-    .then(data => {
-      const matches = (data.matches || [])
-        .filter(match =>
-          match.status === "FINISHED" &&
-          match.score?.fullTime?.home != null &&
-          match.score?.fullTime?.away != null
-        )
-        .sort((a, b) =>
-          new Date(b.utcDate) - new Date(a.utcDate)
-        );
+  const remaining = clamp(duration - minute, 0, duration);
 
-      console.log(
-        "H2H response:",
-        matchId,
-        "meetings:",
-        matches.length
-      );
+  let remainingHome = Math.max(
+    0.08,
+    preHomeXG * (remaining / 90)
+  );
 
-      const result = { matches };
+  let remainingAway = Math.max(
+    0.08,
+    preAwayXG * (remaining / 90)
+  );
 
-      cacheSet(h2hCache, key, result, 1440);
+  if (score.home < score.away) remainingHome *= 1.12;
+  if (score.away < score.home) remainingAway *= 1.12;
+  if (score.home > score.away) remainingHome *= 0.94;
+  if (score.away > score.home) remainingAway *= 0.94;
 
-      return result;
-    })
-    .catch(error => {
-      console.error(
-        "H2H API request failed:",
-        matchId,
-        error.message
-      );
+  remainingHome = clamp(remainingHome, 0.01, 3.5);
+  remainingAway = clamp(remainingAway, 0.01, 3.5);
 
-      throw error;
-    })
-    .finally(() => {
-      h2hPending.delete(key);
-    });
+  const homeDist = poissonDistribution(remainingHome, 9);
+  const awayDist = poissonDistribution(remainingAway, 9);
 
-  h2hPending.set(key, {
-    endpoint,
-    promise: request
-  });
+  let homeWin = 0;
+  let draw = 0;
+  let awayWin = 0;
+  let bttsYes = 0;
 
-  return request;
-}
+  const totals = Array(32).fill(0);
 
-/* =====================================
-   CALCULATE HEAD-TO-HEAD STATISTICS
-===================================== */
+  for (let h = 0; h < homeDist.length; h++) {
+    for (let a = 0; a < awayDist.length; a++) {
+      const finalHome = score.home + h;
+      const finalAway = score.away + a;
+      const p = homeDist[h] * awayDist[a];
 
-function calculateHeadToHead(matches, homeId, awayId) {
-  const result = {
-    available: false,
-    played: 0,
+      if (finalHome > finalAway) homeWin += p;
+      else if (finalHome === finalAway) draw += p;
+      else awayWin += p;
 
-    homeWins: 0,
-    draws: 0,
-    awayWins: 0,
+      if (finalHome > 0 && finalAway > 0) bttsYes += p;
 
-    homeGoals: 0,
-    awayGoals: 0,
+      totals[finalHome + finalAway] += p;
+    }
+  }
 
-    averageHomeGoals: 0,
-    averageAwayGoals: 0,
+  const over = n =>
+    totals.slice(n + 1).reduce((a, b) => a + b, 0);
 
-    recentMeetings: []
+  const under = n => 1 - over(n);
+
+  const probabilities = {
+    homeWin: percent(homeWin),
+    draw: percent(draw),
+    awayWin: percent(awayWin),
+    doubleChance1X: percent(homeWin + draw),
+    doubleChanceX2: percent(draw + awayWin),
+    doubleChance12: percent(homeWin + awayWin),
+    over05: percent(over(0)),
+    under05: percent(under(0)),
+    over15: percent(over(1)),
+    under15: percent(under(1)),
+    over25: percent(over(2)),
+    under25: percent(under(2)),
+    over35: percent(over(3)),
+    under35: percent(under(3)),
+    bttsYes: percent(bttsYes),
+    bttsNo: percent(1 - bttsYes)
   };
 
-  for (const match of matches || []) {
-    const matchHomeId = match.homeTeam?.id;
-    const matchAwayId = match.awayTeam?.id;
-
-    const homeGoals = match.score?.fullTime?.home;
-    const awayGoals = match.score?.fullTime?.away;
-
-    if (
-      !(
-        (matchHomeId === homeId && matchAwayId === awayId) ||
-        (matchHomeId === awayId && matchAwayId === homeId)
-      ) ||
-      homeGoals == null ||
-      awayGoals == null
-    ) {
-      continue;
-    }
-
-    let goalsFor;
-    let goalsAgainst;
-
-    if (matchHomeId === homeId) {
-      goalsFor = homeGoals;
-      goalsAgainst = awayGoals;
-    } else {
-      goalsFor = awayGoals;
-      goalsAgainst = homeGoals;
-    }
-
-    result.played++;
-
-    result.homeGoals += goalsFor;
-    result.awayGoals += goalsAgainst;
-
-    if (goalsFor > goalsAgainst) {
-      result.homeWins++;
-    } else if (goalsFor < goalsAgainst) {
-      result.awayWins++;
-    } else {
-      result.draws++;
-    }
-
-    result.recentMeetings.push({
-      date: match.utcDate,
-
-      homeTeam: match.homeTeam?.name || "Unknown",
-      awayTeam: match.awayTeam?.name || "Unknown",
-
-      homeGoals,
-      awayGoals,
-
-      goalsFor,
-      goalsAgainst,
-
-      status: match.status
-    });
-  }
-
-  if (result.played > 0) {
-    result.available = true;
-
-    result.averageHomeGoals =
-      result.homeGoals / result.played;
-
-    result.averageAwayGoals =
-      result.awayGoals / result.played;
-  }
-
-  return result;
-}
-
-/* =====================================
-   EXPECTED GOALS MODEL
-===================================== */
-
-function calculateExpectedGoals(homeStats, awayStats, headToHead) {
-  const homeOverallAttack =
-    homeStats.averageGoalsFor;
-
-  const homeOverallDefence =
-    homeStats.averageGoalsAgainst;
-
-  const awayOverallAttack =
-    awayStats.averageGoalsFor;
-
-  const awayOverallDefence =
-    awayStats.averageGoalsAgainst;
-
-  const homeVenueAttack =
-    homeStats.home.played
-      ? homeStats.home.averageGoalsFor
-      : homeOverallAttack;
-
-  const homeVenueDefence =
-    homeStats.home.played
-      ? homeStats.home.averageGoalsAgainst
-      : homeOverallDefence;
-
-  const awayVenueAttack =
-    awayStats.away.played
-      ? awayStats.away.averageGoalsFor
-      : awayOverallAttack;
-
-  const awayVenueDefence =
-    awayStats.away.played
-      ? awayStats.away.averageGoalsAgainst
-      : awayOverallDefence;
-
-  const overallHomeXG =
-    (homeOverallAttack + awayOverallDefence) / 2;
-
-  const overallAwayXG =
-    (awayOverallAttack + homeOverallDefence) / 2;
-
-  const homeVenueWeight = Math.min(
-    0.65,
-    Math.min(homeStats.home.played, awayStats.away.played) / 10 * 0.65
-  );
-
-  const venueHomeXG =
-    (homeVenueAttack + awayVenueDefence) / 2;
-
-  const venueAwayXG =
-    (awayVenueAttack + homeVenueDefence) / 2;
-
-  let homeXG =
-    overallHomeXG * (1 - homeVenueWeight) +
-    venueHomeXG * homeVenueWeight;
-
-  let awayXG =
-    overallAwayXG * (1 - homeVenueWeight) +
-    venueAwayXG * homeVenueWeight;
-
-  let h2hWeight = 0;
-
-  if (headToHead?.played > 0) {
-    h2hWeight = Math.min(
-      0.15,
-      headToHead.played * 0.03
-    );
-
-    homeXG =
-      homeXG * (1 - h2hWeight) +
-      headToHead.averageHomeGoals * h2hWeight;
-
-    awayXG =
-      awayXG * (1 - h2hWeight) +
-      headToHead.averageAwayGoals * h2hWeight;
-  }
-
-  homeXG = Math.max(0.2, Math.min(4, homeXG));
-  awayXG = Math.max(0.2, Math.min(4, awayXG));
-
   return {
-    homeXG,
-    awayXG,
-    venueWeight: homeVenueWeight,
-    h2hWeight
-  };
-}
-
-/* =====================================
-   MARKET RECOMMENDATIONS
-===================================== */
-
-function makeRecommendations(probabilities) {
-  const definitions = [
-    ["Home Win", "homeWin"],
-    ["Draw", "draw"],
-    ["Away Win", "awayWin"],
-
-    ["Double Chance 1X", "doubleChance1X"],
-    ["Double Chance X2", "doubleChanceX2"],
-    ["Double Chance 12", "doubleChance12"],
-
-    ["Over 1.5 Goals", "over15"],
-    ["Under 1.5 Goals", "under15"],
-
-    ["Over 2.5 Goals", "over25"],
-    ["Under 2.5 Goals", "under25"],
-
-    ["Over 3.5 Goals", "over35"],
-    ["Under 3.5 Goals", "under35"],
-
-    ["BTTS Yes", "bttsYes"],
-    ["BTTS No", "bttsNo"]
-  ];
-
-  return definitions
-    .map(([market, key]) => ({
-      market,
-      key,
-      probability: probabilities[key]
-    }))
-    .filter(item =>
-      Number.isFinite(item.probability) &&
-      item.probability > 0 &&
-      item.probability <= 100
-    )
-    .sort((a, b) =>
-      b.probability - a.probability
-    )
-    .map((item, index) => ({
-      rank: index + 1,
-      market: item.market,
-      key: item.key,
-      probability: Number(item.probability.toFixed(1)),
-
-      confidence:
-        item.probability >= 70
-          ? "HIGH"
-          : item.probability >= 55
-            ? "MODERATE"
-            : "LOW"
-    }));
-}
-
-/* =====================================
-   BUILD MATCH ANALYSIS
-===================================== */
-
-async function buildMatchAnalysis(matchId, priorityState) {
-  const match = await getMatchInformation(
-    matchId,
-    priorityState
-  );
-
-  if (
-    !match.homeTeam?.id ||
-    !match.awayTeam?.id
-  ) {
-    const error = new Error(
-      "Team information is unavailable."
-    );
-
-    error.status = 422;
-    throw error;
-  }
-
-  const homeId = match.homeTeam.id;
-  const awayId = match.awayTeam.id;
-
-  const [homeMatches, awayMatches, h2hData] =
-    await Promise.all([
-      getTeamHistory(homeId, priorityState),
-      getTeamHistory(awayId, priorityState),
-
-      getHeadToHead(matchId, priorityState)
-        .catch(error => {
-          console.error(
-            "H2H analysis unavailable:",
-            error.message
-          );
-
-          return {
-            matches: [],
-            unavailable: true
-          };
-        })
-    ]);
-
-  const headToHead = calculateHeadToHead(
-    h2hData.matches,
-    homeId,
-    awayId
-  );
-
-  const homeStats = getTeamStats(
-    homeMatches,
-    homeId
-  );
-
-  const awayStats = getTeamStats(
-    awayMatches,
-    awayId
-  );
-
-  if (!homeStats.played || !awayStats.played) {
-    const error = new Error(
-      "Not enough completed team matches for reliable analysis."
-    );
-
-    error.status = 422;
-    error.homeMatchesAvailable = homeStats.played;
-    error.awayMatchesAvailable = awayStats.played;
-
-    throw error;
-  }
-
-  const expected = calculateExpectedGoals(
-    homeStats,
-    awayStats,
-    headToHead
-  );
-
-  const homeXG = expected.homeXG;
-  const awayXG = expected.awayXG;
-
-  const probabilities = calculateProbabilities(
-    homeXG,
-    awayXG
-  );
-
-  const roundedProbabilities = Object.fromEntries(
-    Object.entries(probabilities).map(([key, value]) => [
-      key,
-      Number(value.toFixed(1))
-    ])
-  );
-
-  const recommendations = makeRecommendations(
-    roundedProbabilities
-  );
-
-  /*
-    VIP recommendation:
-    No fixed 75% qualification threshold.
-    The strongest supported market is returned.
-  */
-
-  const vipRecommendation =
-    recommendations.length
-      ? recommendations[0]
-      : null;
-
-  return {
-    match: {
-      id: match.id,
-      utcDate: match.utcDate,
-      status: match.status,
-
-      homeTeam: {
-        id: match.homeTeam.id,
-        name: match.homeTeam.name,
-        crest: match.homeTeam.crest || ""
-      },
-
-      awayTeam: {
-        id: match.awayTeam.id,
-        name: match.awayTeam.name,
-        crest: match.awayTeam.crest || ""
-      },
-
-      competition: {
-        id: match.competition?.id || null,
-        name: match.competition?.name || "Unknown"
-      },
-
-      score: match.score || {}
+    available: true,
+    isLiveAdjusted: true,
+    minute,
+    currentScore: score,
+    expectedRemainingGoals: {
+      home: Math.round(remainingHome * 100) / 100,
+      away: Math.round(remainingAway * 100) / 100
     },
-
-    model: {
-      name: "GENERAL TIPS Statistical Model",
-
-      expectedHomeGoals: Number(homeXG.toFixed(2)),
-      expectedAwayGoals: Number(awayXG.toFixed(2)),
-
-      matchesPerTeam: 10,
-
-      homeVenueMatches: homeStats.home.played,
-      awayVenueMatches: awayStats.away.played,
-
-      h2hMatches: headToHead.played,
-
-      h2hInfluence: Number(
-        (expected.h2hWeight * 100).toFixed(1)
-      ),
-
-      venueInfluence: Number(
-        (expected.venueWeight * 100).toFixed(1)
-      ),
-
-      note:
-        "Estimates combine recent results, venue performance, head-to-head history and Poisson goal modelling."
-    },
-
-    teamForm: {
-      home: homeStats,
-      away: awayStats
-    },
-
-    headToHead,
-
-    probabilities: roundedProbabilities,
-
-    recommendations,
-
-    vipRecommendation,
-
-    limitations: [
-      "Probabilities are statistical model estimates, not guarantees.",
-      "Head-to-head influence is limited to reduce the effect of small historical samples.",
-      "Recent results may include different competitions.",
-      "Injuries, suspensions and confirmed line-ups are not included.",
-      "The model does not use bookmaker odds.",
-      "Venue statistics depend on available historical matches."
-    ],
-
+    probabilities,
+    recommendations: makeRecommendations(probabilities),
     generatedAt: new Date().toISOString()
   };
 }
+function mapApiFootballStatus(short) {
+  const s = String(short || '').toUpperCase();
 
-/* =====================================
-   FIREBASE SUBSCRIPTION ROUTES
-===================================== */
+  if (['1H', '2H', 'LIVE'].includes(s)) return 'IN_PLAY';
+  if (['HT', 'BT'].includes(s)) return 'PAUSED';
+  if (['ET', 'AET'].includes(s)) return 'EXTRA_TIME';
+  if (s === 'P') return 'PENALTY_SHOOTOUT';
+  if (['FT', 'PEN', 'AWD', 'WO'].includes(s)) return 'FINISHED';
+  if (s === 'PST') return 'POSTPONED';
+  if (s === 'CANC') return 'CANCELLED';
+  if (s === 'ABD') return 'ABANDONED';
+  if (s === 'SUSP') return 'SUSPENDED';
+  if (s === 'INT') return 'SUSPENDED';
+  if (s === 'TBD') return 'TIMED';
 
-app.post("/api/notifications/subscribe", async (req, res) => {
-  if (!firebaseReady) {
-    return res.status(503).json({
-      error: "Notification service is unavailable."
-    });
-  }
+  return 'SCHEDULED';
+}
 
-  const token = cleanNotificationText(
-    req.body.token,
-    4096
-  );
+function adaptApiFootballFixture(item) {
+  const f = item.fixture || {};
+  const teams = item.teams || {};
+  const league = item.league || {};
+  const goals = item.goals || {};
+  const full = item.score?.fulltime || {};
 
-  if (!token || token.length < 20) {
-    return res.status(400).json({
-      error: "A valid notification token is required."
-    });
-  }
+  return {
+    id: f.id,
+    utcDate: f.date,
+    status: mapApiFootballStatus(f.status?.short),
+    minute: Number.isInteger(f.status?.elapsed)
+      ? f.status.elapsed
+      : null,
 
-  try {
-    const id = hashToken(token);
+    homeTeam: {
+      id: teams.home?.id,
+      name: teams.home?.name || 'Home team',
+      crest: teams.home?.logo || null
+    },
 
-    await db
-      .collection("notificationSubscribers")
-      .doc(id)
-      .set({
-        token,
-        active: true,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
+    awayTeam: {
+      id: teams.away?.id,
+      name: teams.away?.name || 'Away team',
+      crest: teams.away?.logo || null
+    },
 
-    res.json({
-      ok: true,
-      message: "Notification subscription saved."
-    });
+    competition: {
+      id: league.id,
+      name: league.name || 'Football',
+      code: league.country || ''
+    },
 
-  } catch (error) {
-    console.error("Subscription error:", error.message);
+    score: {
+      fullTime: {
+        home: full.home ?? goals.home ?? null,
+        away: full.away ?? goals.away ?? null
+      },
 
-    res.status(500).json({
-      error: "Unable to save notification subscription."
-    });
-  }
-});
+      duration:
+        f.status?.short === 'AET' ||
+        f.status?.short === 'ET'
+          ? 'EXTRA_TIME'
+          : 'REGULAR'
+    },
 
-app.post("/api/notifications/unsubscribe", async (req, res) => {
-  if (!firebaseReady) {
-    return res.status(503).json({
-      error: "Notification service is unavailable."
-    });
-  }
+    venue: f.venue?.name || null,
+    _provider: 'api-football'
+  };
+}
 
-  const token = cleanNotificationText(
-    req.body.token,
-    4096
-  );
-
-  if (!token) {
-    return res.status(400).json({
-      error: "Notification token is required."
-    });
-  }
-
-  try {
-    await db
-      .collection("notificationSubscribers")
-      .doc(hashToken(token))
-      .delete();
-
-    res.json({
-      ok: true,
-      message: "Notification subscription removed."
-    });
-
-  } catch (error) {
-    console.error("Unsubscribe error:", error.message);
-
-    res.status(500).json({
-      error: "Unable to remove subscription."
-    });
-  }
-});
-
-/* =====================================
-   ADMIN LOGIN
-===================================== */
-
-app.post("/api/admin/login", (req, res) => {
-  if (!ADMIN_PASSWORD) {
-    return res.status(503).json({
-      error: "ADMIN_PASSWORD is not configured."
-    });
-  }
-
-  const password = req.body.password;
-
-  if (!safeCompare(password, ADMIN_PASSWORD)) {
-    return res.status(401).json({
-      error: "Incorrect administrator password."
-    });
-  }
-
-  const token = createAdminSession();
-
-  res.json({
-    ok: true,
-    token,
-    expiresIn: ADMIN_SESSION_DURATION
-  });
-});
-
-/* =====================================
-   ADMIN DASHBOARD DATA
-===================================== */
-
-app.get(
-  "/api/admin/status",
-  requireAdmin,
-  async (req, res) => {
-    if (!firebaseReady) {
-      return res.status(503).json({
-        error: "Firebase is unavailable."
-      });
-    }
-
-    try {
-      const subscriberSnapshot = await db
-        .collection("notificationSubscribers")
-        .get();
-
-      const campaignsSnapshot = await db
-        .collection("notificationCampaigns")
-        .orderBy("createdAt", "desc")
-        .limit(10)
-        .get();
-
-      const campaigns = campaignsSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-
-      res.json({
-        ok: true,
-        app: "GENERAL FOOTBALL TIPS V1.0",
-        firebaseReady,
-        subscribers: subscriberSnapshot.size,
-        campaigns
-      });
-
-    } catch (error) {
-      console.error("Admin status error:", error.message);
-
-      res.status(500).json({
-        error: "Unable to load administrator dashboard."
-      });
-    }
-  }
-);
-
-/* =====================================
-   ADMIN TEST NOTIFICATION
-===================================== */
-
-app.post(
-  "/api/admin/test-notification",
-  requireAdmin,
-  async (req, res) => {
-    if (!firebaseReady) {
-      return res.status(503).json({
-        error: "Firebase is unavailable."
-      });
-    }
-
-    const token = cleanNotificationText(
-      req.body.token,
-      4096
+async function getMatchInformation(
+  matchId,
+  priority = 'background',
+  forceFresh = false
+) {
+  if (!forceFresh) {
+    const cached = cacheGet(
+      matchCache,
+      matchId,
+      MATCH_CACHE_TTL
     );
 
-    const title = cleanNotificationText(
-      req.body.title || "GENERAL FOOTBALL TIPS",
-      100
-    );
-
-    const body = cleanNotificationText(
-      req.body.body || "Your test notification is working.",
-      300
-    );
-
-    if (!token) {
-      return res.status(400).json({
-        error: "Your device notification token is required."
-      });
+    if (cached && !isLiveStatus(cached.status)) {
+      return cached;
     }
 
-    try {
-      const messageId = await messaging.send({
-        token,
-        notification: {
-          title,
-          body
-        },
-        data: {
-          type: "test",
-          app: "GENERAL FOOTBALL TIPS"
-        },
-        webpush: {
-          notification: {
-            icon: "/icon-192.png",
-            badge: "/icon-192.png"
-          }
-        }
-      });
-
-      res.json({
-        ok: true,
-        message: "Test notification sent.",
-        messageId
-      });
-
-    } catch (error) {
-      console.error("Test notification error:", error.message);
-
-      res.status(400).json({
-        error: "Unable to send test notification.",
-        details: error.message
-      });
+    if (
+      cached &&
+      isLiveStatus(cached.status) &&
+      now() - matchCache.get(String(matchId)).at <
+        LIVE_MATCH_CACHE_TTL
+    ) {
+      return cached;
     }
   }
-);
 
-/* =====================================
-   MANUAL UPDATE APPROVAL
-===================================== */
+  if (matchPending.has(String(matchId))) {
+    return matchPending.get(String(matchId));
+  }
 
-app.post(
-  "/api/admin/approve-update",
-  requireAdmin,
-  async (req, res) => {
-    if (!firebaseReady) {
-      return res.status(503).json({
-        error: "Firebase is unavailable."
-      });
-    }
+  const pending = footballRequest(
+    `/fixtures?id=${encodeURIComponent(matchId)}`,
+    priority
+  )
+    .then(data => {
+      const item = Array.isArray(data.response)
+        ? data.response[0]
+        : null;
 
-    const version = cleanNotificationText(
-      req.body.version,
-      40
-    );
-
-    const title = cleanNotificationText(
-      req.body.title,
-      100
-    );
-
-    const body = cleanNotificationText(
-      req.body.body,
-      300
-    );
-
-    if (!version || !title || !body) {
-      return res.status(400).json({
-        error: "Version, title and announcement are required."
-      });
-    }
-
-    const campaignId = crypto
-      .createHash("sha256")
-      .update(version.toLowerCase())
-      .digest("hex")
-      .slice(0, 40);
-
-    const campaignRef = db
-      .collection("notificationCampaigns")
-      .doc(campaignId);
-
-    try {
-      const reservation = await db.runTransaction(async transaction => {
-        const existing = await transaction.get(campaignRef);
-
-        if (existing.exists) return false;
-
-        transaction.create(campaignRef, {
-          version,
-          title,
-          body,
-          status: "sending",
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          sent: 0,
-          failed: 0
-        });
-
-        return true;
-      });
-
-      if (!reservation) {
-        return res.status(409).json({
-          error: "This version has already been approved or submitted.",
-          campaignId
-        });
-      }
-
-      const subscribersSnapshot = await db
-        .collection("notificationSubscribers")
-        .get();
-
-      const subscribers = subscribersSnapshot.docs;
-
-      let sent = 0;
-      let failed = 0;
-
-      const invalidDocuments = [];
-
-      for (let i = 0; i < subscribers.length; i += 500) {
-        const batch = subscribers.slice(i, i + 500);
-
-        const tokens = batch
-          .map(doc => doc.data().token)
-          .filter(Boolean);
-
-        if (!tokens.length) continue;
-
-        try {
-          const result = await messaging.sendEachForMulticast({
-            tokens,
-            notification: {
-              title,
-              body
-            },
-            data: {
-              type: "update",
-              version,
-              campaignId
-            },
-            webpush: {
-              notification: {
-                icon: "/icon-192.png",
-                badge: "/icon-192.png"
-              }
-            }
-          });
-
-          sent += result.successCount;
-          failed += result.failureCount;
-
-          result.responses.forEach((response, index) => {
-            if (
-              !response.success &&
-              notificationErrorIsInvalidToken(response.error)
-            ) {
-              invalidDocuments.push(batch[index].ref);
-            }
-          });
-
-        } catch (error) {
-          console.error(
-            "Notification batch failed:",
-            error.message
-          );
-
-          failed += tokens.length;
-        }
-      }
-
-      for (const document of invalidDocuments) {
-        try {
-          await document.delete();
-        } catch (error) {
-          console.error(
-            "Invalid subscription cleanup failed:",
-            error.message
-          );
-        }
-      }
-
-      await campaignRef.update({
-        status: failed === 0
-          ? "completed"
-          : "completed_with_errors",
-
-        sent,
-        failed,
-
-        finishedAt:
-          admin.firestore.FieldValue.serverTimestamp()
-      });
-
-      res.json({
-        ok: true,
-        message: "Manual update notification campaign completed.",
-        version,
-        sent,
-        failed,
-        campaignId
-      });
-
-    } catch (error) {
-      console.error(
-        "Update approval error:",
-        error.message
-      );
-
-      try {
-        await campaignRef.set({
-          version,
-          title,
-          body,
-          status: "failed",
-          error: error.message,
-          updatedAt:
-            admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
-
-      } catch (recordError) {
-        console.error(
-          "Campaign record error:",
-          recordError.message
+      if (!item) {
+        throw new Error(
+          'Match details are not available from API-Football.'
         );
       }
 
-      res.status(500).json({
-        error: "The update notification campaign could not be completed.",
-        details: error.message
+      const match = adaptApiFootballFixture(item);
+
+      cacheSet(matchCache, matchId, match);
+
+      return match;
+    })
+    .finally(() => {
+      matchPending.delete(String(matchId));
+    });
+
+  matchPending.set(String(matchId), pending);
+
+  return pending;
+}
+
+function getTeamScore(match, teamId) {
+  const score = match?.score || {};
+  const ft = score.fullTime || score.fulltime || {};
+
+  const homeId = match?.homeTeam?.id;
+  const awayId = match?.awayTeam?.id;
+
+  const home = ft.home ?? ft.homeTeam;
+  const away = ft.away ?? ft.awayTeam;
+
+  if (teamId === homeId) return home;
+  if (teamId === awayId) return away;
+
+  return null;
+}
+
+async function getTeamStats(
+  teamId,
+  priority = 'background'
+) {
+  const cached = cacheGet(
+    teamCache,
+    teamId,
+    TEAM_CACHE_TTL
+  );
+
+  if (cached) return cached;
+
+  if (teamPending.has(String(teamId))) {
+    return teamPending.get(String(teamId));
+  }
+
+  const pending = footballRequest(
+    `/fixtures?team=${encodeURIComponent(teamId)}&last=10&status=FT`,
+    priority
+  )
+    .then(data => {
+      const matches = Array.isArray(data.response)
+        ? data.response
+        : [];
+
+      const scored = [];
+      const conceded = [];
+      const form = [];
+
+      matches.forEach(item => {
+        const m = adaptApiFootballFixture(item);
+
+        const h = Number(m.score?.fullTime?.home);
+        const a = Number(m.score?.fullTime?.away);
+
+        if (!Number.isFinite(h) || !Number.isFinite(a)) {
+          return;
+        }
+
+        if (m.homeTeam.id === Number(teamId)) {
+          scored.push(h);
+          conceded.push(a);
+        } else if (m.awayTeam.id === Number(teamId)) {
+          scored.push(a);
+          conceded.push(h);
+        } else {
+          return;
+        }
+
+        const gf =
+          m.homeTeam.id === Number(teamId) ? h : a;
+
+        const ga =
+          m.homeTeam.id === Number(teamId) ? a : h;
+
+        form.push(
+          gf > ga ? 'W' : gf === ga ? 'D' : 'L'
+        );
       });
+
+      const count = scored.length;
+
+      const totalFor = scored.reduce(
+        (a, b) => a + b,
+        0
+      );
+
+      const totalAgainst = conceded.reduce(
+        (a, b) => a + b,
+        0
+      );
+
+      const stats = {
+        played: count,
+
+        wins: form.filter(x => x === 'W').length,
+        draws: form.filter(x => x === 'D').length,
+        losses: form.filter(x => x === 'L').length,
+
+        goalsFor: totalFor,
+        goalsAgainst: totalAgainst,
+
+        averageGoalsFor: count
+          ? totalFor / count
+          : 1.25,
+
+        averageGoalsAgainst: count
+          ? totalAgainst / count
+          : 1.25,
+
+        form: form.slice(0, 5)
+      };
+
+      return cacheSet(teamCache, teamId, stats);
+    })
+    .finally(() => {
+      teamPending.delete(String(teamId));
+    });
+
+  teamPending.set(String(teamId), pending);
+
+  return pending;
+}
+
+function expectedGoals(homeStats, awayStats) {
+  const homeFor =
+    Number(homeStats.averageGoalsFor) || 1.25;
+
+  const homeAgainst =
+    Number(homeStats.averageGoalsAgainst) || 1.25;
+
+  const awayFor =
+    Number(awayStats.averageGoalsFor) || 1.15;
+
+  const awayAgainst =
+    Number(awayStats.averageGoalsAgainst) || 1.25;
+
+  return {
+    home: clamp(
+      (homeFor * 0.58 + awayAgainst * 0.42) * 1.08,
+      0.2,
+      4.2
+    ),
+
+    away: clamp(
+      (awayFor * 0.58 + homeAgainst * 0.42) * 0.92,
+      0.2,
+      4.2
+    )
+  };
+}
+
+function buildTeamForm(homeStats, awayStats) {
+  return {
+    home: homeStats,
+    away: awayStats
+  };
+}
+
+async function buildMatchAnalysis(
+  match,
+  priority = 'background'
+) {
+  const [homeStats, awayStats] = await Promise.all([
+    getTeamStats(match.homeTeam.id, priority),
+    getTeamStats(match.awayTeam.id, priority)
+  ]);
+
+  const xg = expectedGoals(homeStats, awayStats);
+
+  const preMatchProbabilities =
+    marketProbabilities(xg.home, xg.away);
+
+  const preMatchRecommendations =
+    makeRecommendations(preMatchProbabilities);
+
+  const liveAnalysis = isLiveStatus(match.status)
+    ? liveProbabilityModel(xg.home, xg.away, match)
+    : null;
+
+  const isLive = isLiveStatus(match.status);
+
+  const usableLive = !!(
+    liveAnalysis &&
+    liveAnalysis.available &&
+    liveAnalysis.isLiveAdjusted
+  );
+
+  return {
+    match,
+
+    probabilities: usableLive
+      ? liveAnalysis.probabilities
+      : preMatchProbabilities,
+
+    recommendations: usableLive
+      ? liveAnalysis.recommendations
+      : preMatchRecommendations,
+
+    probabilityMode: isLive
+      ? usableLive
+        ? 'LIVE_ADJUSTED'
+        : 'LIVE_UNAVAILABLE'
+      : 'PRE_MATCH',
+
+    preMatchProbabilities,
+    preMatchRecommendations,
+
+    liveAnalysis: isLive
+      ? liveAnalysis
+      : {
+          available: false,
+          reason: 'Match has not started.'
+        },
+
+    teamForm: buildTeamForm(homeStats, awayStats),
+
+    model: {
+      name: 'Recent-form Poisson model',
+      expectedGoals: xg,
+
+      sample: {
+        homePlayed: homeStats.played,
+        awayPlayed: awayStats.played
+      },
+
+      note:
+        'Statistical estimates based on recent completed matches. They are not guaranteed outcomes.'
+    },
+
+    limitations: [
+      'Lineups, injuries, suspensions, weather and tactical changes may not be reflected.',
+      'Live estimates require a reliable provider match minute and current score.'
+    ]
+  };
+}
+
+async function getFixtureDateRange() {
+  const from = new Date();
+  const to = new Date();
+
+  to.setUTCDate(to.getUTCDate() + 10);
+
+  return {
+    from: from.toISOString().slice(0, 10),
+    to: to.toISOString().slice(0, 10)
+  };
+}
+
+async function saveFixtureMatches(
+  priority = 'normal',
+  force = false
+) {
+  if (
+    !force &&
+    fixtureCache.value &&
+    now() - fixtureCache.at < FIXTURE_CACHE_TTL
+  ) {
+    return fixtureCache.value;
+  }
+
+  const range = await getFixtureDateRange();
+
+  const firstPage = await footballRequest(
+    `/fixtures?from=${range.from}&to=${range.to}&timezone=Africa/Lagos&page=1`,
+    priority
+  );
+
+  let raw = Array.isArray(firstPage.response)
+    ? firstPage.response.slice()
+    : [];
+
+  const totalPages = Number(firstPage.paging?.total || 1);
+
+  const pagesToFetch = Math.min(
+    FIXTURE_PAGES,
+    totalPages
+  );
+
+  for (let page = 2; page <= pagesToFetch; page++) {
+    const next = await footballRequest(
+      `/fixtures?from=${range.from}&to=${range.to}&timezone=Africa/Lagos&page=${page}`,
+      priority
+    );
+
+    if (Array.isArray(next.response)) {
+      raw = raw.concat(next.response);
     }
   }
-);
 
-/* =====================================
-   HEALTH CHECK
-===================================== */
+  const matches = raw
+    .map(adaptApiFootballFixture)
+    .filter(
+      m => m.id && m.homeTeam.id && m.awayTeam.id
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.utcDate) - new Date(b.utcDate)
+    );
 
-app.get("/api/health", (req, res) => {
+  // Reuse fixture details for match analysis.
+  matches.forEach(match => {
+    cacheSet(matchCache, match.id, match);
+  });
+
+  fixtureCache.value = {
+    matches,
+
+    filters: {
+      dateFrom: range.from,
+      dateTo: range.to,
+      provider: 'API-Football',
+      pagesFetched: pagesToFetch,
+      totalPagesAvailable: totalPages
+    },
+
+    updatedAt: new Date().toISOString()
+  };
+
+  fixtureCache.at = now();
+
+  return fixtureCache.value;
+}
+
+app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
-    app: "GENERAL FOOTBALL TIPS V1.0",
-
-    apiKeyConfigured: Boolean(API_TOKEN),
-    firebaseReady,
-    adminPasswordConfigured: Boolean(ADMIN_PASSWORD),
-
-    timezone: TIME_ZONE,
+    app: 'GENERAL FOOTBALL TIPS V1.0',
+    apiKeyConfigured: !!API_TOKEN,
+    provider: 'API-Football',
 
     queuedRequests: apiQueue.length,
-    runningRequest: apiRequestRunning,
+    runningRequest,
 
-    cachedFixtures: Boolean(fixtureCache.data),
+    cachedFixtures: !!fixtureCache.value,
     cachedAnalyses: analysisCache.size,
     cachedTeams: teamCache.size,
     cachedMatches: matchCache.size,
-    cachedH2H: h2hCache.size,
 
     pendingAnalyses: analysisPending.size
   });
 });
 
-/* =====================================
-   FIXTURES
-===================================== */
-
-app.get("/api/fixtures", async (req, res) => {
-  if (!API_TOKEN) {
-    return res.status(503).json({
-      error: "Football API token is not configured."
-    });
-  }
-
-  const forceRefresh = req.query.refresh === "1";
-
-  const { dateFrom, dateTo } = getFixtureDateRange();
-
-  if (
-    !forceRefresh &&
-    fixtureCache.data &&
-    Date.now() < fixtureCache.expiresAt &&
-    fixtureCache.dateFrom === dateFrom &&
-    fixtureCache.dateTo === dateTo
-  ) {
-    return res.json(fixtureCache.data);
-  }
-
-  if (!pendingFixtures) {
-    pendingFixtures = footballRequest(
-      `/matches?dateFrom=${dateFrom}&dateTo=${dateTo}`,
-      "normal"
-    )
-      .then(data => {
-        const matches = (data.matches || [])
-          .sort((a, b) =>
-            new Date(a.utcDate) - new Date(b.utcDate)
-          );
-
-        saveFixtureMatches(matches);
-
-        const result = {
-          count: matches.length,
-          matches,
-          dateFrom,
-          dateTo,
-          interval: "7 days",
-          timezone: TIME_ZONE,
-          updatedAt: new Date().toISOString()
-        };
-
-        fixtureCache.data = result;
-        fixtureCache.dateFrom = dateFrom;
-        fixtureCache.dateTo = dateTo;
-        fixtureCache.expiresAt =
-          Date.now() + 5 * 60 * 1000;
-
-        return result;
-      });
-  }
-
-  const request = pendingFixtures;
-
+app.get('/api/fixtures', async (req, res) => {
   try {
-    const result = await request;
-    res.json(result);
-
-  } catch (error) {
-    console.error("Fixture error:", error.message);
-
-    res.status(error.status || 500).json({
-      error: "Unable to load football fixtures.",
-      details: error.message
-    });
-
-  } finally {
-    if (pendingFixtures === request) {
-      pendingFixtures = null;
-    }
-  }
-});
-
-/* =====================================
-   MATCH ANALYSIS
-===================================== */
-
-app.get("/api/match/:id/analysis", async (req, res) => {
-  const matchId = req.params.id;
-
-  if (!/^\d+$/.test(matchId)) {
-    return res.status(400).json({
-      error: "Invalid match ID."
-    });
-  }
-
-  const priority = normalizePriority(req.query.priority);
-
-  const cached = cacheGet(analysisCache, matchId);
-
-  if (cached) {
-    return res.json(cached);
-  }
-
-  try {
-    let pending = analysisPending.get(matchId);
-
-    if (pending) {
-      if (
-        priorityWeight(priority) <
-        priorityWeight(pending.priorityState.priority)
-      ) {
-        pending.priorityState.priority = priority;
-      }
-
-      promoteFootballRequest(
-        `/matches/${matchId}`,
-        priority
-      );
-
-    } else {
-      const priorityState = { priority };
-
-      const promise = buildMatchAnalysis(
-        matchId,
-        priorityState
-      )
-        .then(result => {
-          cacheSet(analysisCache, matchId, result, 60);
-          return result;
-        })
-        .finally(() => {
-          analysisPending.delete(matchId);
-        });
-
-      pending = {
-        promise,
-        priorityState
-      };
-
-      analysisPending.set(matchId, pending);
-    }
-
-    const result = await pending.promise;
-
-    res.json(result);
-
-  } catch (error) {
-    console.error(
-      "Analysis error:",
-      matchId,
-      error.message
+    const result = await saveFixtureMatches(
+      normalizePriority(req.query.priority || 'normal'),
+      req.query.refresh === '1'
     );
 
+    res.json({
+      matches: result.matches,
+      fixtures: result.matches,
+      updatedAt: result.updatedAt,
+      filters: result.filters
+    });
+  } catch (error) {
     res.status(error.status || 500).json({
-      error: "Unable to analyse this match.",
-      details: error.message,
-      homeMatchesAvailable: error.homeMatchesAvailable,
-      awayMatchesAvailable: error.awayMatchesAvailable
+      error: error.message
     });
   }
 });
 
-/* =====================================
-   FRONTEND ROUTE
-===================================== */
+app.get('/api/match/:id/analysis', async (req, res) => {
+  const id = String(req.params.id);
 
-app.get("*", (req, res) => {
-  res.sendFile(
-    path.join(__dirname, "index.html")
+  const priority = normalizePriority(
+    req.query.priority || 'background'
   );
+
+  try {
+    const match = await getMatchInformation(
+      id,
+      priority,
+      false
+    );
+
+    const live = isLiveStatus(match.status);
+
+    const cached = !live
+      ? cacheGet(analysisCache, id, ANALYSIS_CACHE_TTL)
+      : null;
+
+    if (cached) {
+      return res.json(cached);
+    }
+
+    if (analysisPending.has(id)) {
+      return res.json(await analysisPending.get(id));
+    }
+
+    const pending = buildMatchAnalysis(match, priority)
+      .then(data => {
+        if (!live) {
+          cacheSet(analysisCache, id, data);
+        }
+
+        return data;
+      })
+      .finally(() => {
+        analysisPending.delete(id);
+      });
+
+    analysisPending.set(id, pending);
+
+    res.json(await pending);
+  } catch (error) {
+    res.status(error.status || 500).json({
+      error: error.message
+    });
+  }
 });
 
-/* =====================================
-   SERVER START
-===================================== */
+app.get('/api/match/:id', async (req, res) => {
+  try {
+    res.json(
+      await getMatchInformation(
+        req.params.id,
+        'high',
+        true
+      )
+    );
+  } catch (error) {
+    res.status(error.status || 500).json({
+      error: error.message
+    });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(
-    `GENERAL FOOTBALL TIPS V1.0 running on port ${PORT}`
+    `GENERAL FOOTBALL TIPS V1.0 listening on ${PORT}`
   );
 });
