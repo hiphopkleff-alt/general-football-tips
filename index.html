@@ -928,7 +928,101 @@ header{
  .stat-card{min-height:108px}
  .stat-number{font-size:25px}
  }
+
+/* Screenshot-matched GENERAL FOOTBALL TIPS dashboard */
+body:has(#home.active)>header{display:none}
+body:has(#home.active) .page-nav{display:none}
+body:has(#home.active){padding-bottom:18px}
+
+body{background:radial-gradient(ellipse at 50% -8%,rgba(0,113,255,.48),transparent 43%),radial-gradient(ellipse at 100% 35%,rgba(0,196,255,.12),transparent 34%),linear-gradient(160deg,#020b22,#061b42 54%,#02091c)!important}
+header{background:linear-gradient(100deg,rgba(2,10,32,.98),rgba(4,26,65,.97));border-bottom:1px solid rgba(28,153,255,.5);box-shadow:0 5px 22px rgba(0,0,0,.35)}
+main{max-width:1120px;padding:12px 15px 22px}
+.showcase-brand{display:flex;align-items:center;gap:13px;min-height:112px;padding:13px 10px;border-radius:17px;background:radial-gradient(ellipse at 10% 50%,rgba(0,130,255,.28),transparent 45%),linear-gradient(110deg,#04132f,#061d49 55%,#020d29);border:1px solid rgba(29,149,255,.22);box-shadow:inset 0 0 25px rgba(0,100,255,.12);overflow:hidden}
+.showcase-ball{font-size:62px;filter:drop-shadow(0 0 12px #168bff);line-height:1}
+.showcase-name{flex:1;min-width:0}.showcase-general{font-size:clamp(21px,4.4vw,39px);font-weight:1000;font-style:italic;letter-spacing:-1px;color:#fff;text-shadow:0 2px 3px #000}.showcase-general span{font-size:.65em;color:#ffdf00;background:linear-gradient(120deg,#ffef00,#e7a900);padding:3px 9px;border-radius:9px;color:#101010}.showcase-football{font-size:clamp(21px,4.7vw,42px);font-weight:1000;font-style:italic;letter-spacing:-1px;color:#5dff00;text-shadow:0 2px 5px #004b14;white-space:nowrap}.showcase-football small{font-size:13px;color:#ffdc00;border:2px solid #ffdc00;border-radius:7px;padding:3px 5px;vertical-align:middle}.showcase-name p{font-size:clamp(7px,1.4vw,11px);font-weight:900;letter-spacing:1px;color:#e8f4ff;margin-top:7px;white-space:nowrap}.showcase-name p i{color:#ffe000;font-style:normal;padding:0 5px}.showcase-trophy{font-size:65px;filter:drop-shadow(0 0 12px #ffb900)}
+.showcase-stats{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}.showcase-stats .stat-card{display:flex;align-items:center;gap:9px;min-height:102px;padding:12px 10px;border-radius:18px;border:2px solid rgba(255,255,255,.25);box-shadow:0 0 14px rgba(0,130,255,.35),inset 0 0 16px rgba(255,255,255,.08)}.stat-symbol{font-size:clamp(23px,3.4vw,37px);font-weight:900;color:#fff;text-shadow:0 0 9px currentColor}.stat-copy{display:flex;flex-direction:column;min-width:0;flex:1}.showcase-stats .stat-number{font-size:clamp(23px,3.4vw,38px);margin:0 0 3px;line-height:1}.showcase-stats .stat-label{font-size:clamp(7px,1.1vw,11px);font-weight:1000;white-space:nowrap;letter-spacing:0}.showcase-stats .stat-hint{font-size:clamp(7px,1vw,10px);color:#e2edff;margin-top:4px;white-space:nowrap}.stat-arrow{font-size:27px;line-height:1;color:#06142c;background:#28caff;width:25px;height:25px;border-radius:50%;text-align:center;flex:0 0 25px}.stat-predictions{background:linear-gradient(135deg,#087bff,#061d71)!important;border-color:#16caff!important}.stat-vip{background:linear-gradient(135deg,#9b18ff,#350078)!important;border-color:#cf46ff!important}.stat-vip .stat-arrow{background:#bd39ff}.stat-recorded{background:linear-gradient(135deg,#00b94b,#005c2b)!important;border-color:#21ff79!important}.stat-recorded .stat-arrow{background:#18ed76}.stat-accuracy{background:linear-gradient(135deg,#ffbd00,#986000)!important;border-color:#ffe000!important}.stat-accuracy .stat-arrow{background:#ffd21c}
+.showcase-promo{position:relative;display:flex;align-items:center;min-height:155px;overflow:hidden;padding:18px 15px;margin:12px 0;border:2px solid #42ff24;border-radius:20px;background:radial-gradient(ellipse at 75% 50%,rgba(0,139,255,.65),transparent 43%),linear-gradient(110deg,#001c16,#064b2b 48%,#06265b 78%,#06152e);box-shadow:0 0 16px rgba(51,255,38,.45),inset 0 0 20px rgba(0,0,0,.55)}.showcase-promo:after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(130deg,transparent 0 75px,rgba(30,255,0,.15) 76px 88px,transparent 89px 145px)}.promo-copy{position:relative;z-index:2;display:flex;flex-direction:column;max-width:62%;text-shadow:0 3px 5px #000}.promo-copy span{font-size:clamp(17px,3vw,30px);font-weight:1000;font-style:italic}.promo-copy strong{font-size:clamp(25px,4.6vw,49px);font-weight:1000;font-style:italic;line-height:1.05;color:#ffe000}.promo-copy em{font-size:clamp(10px,1.8vw,17px);font-weight:1000;font-style:italic;margin-top:8px}.promo-players{position:absolute;z-index:1;right:12%;bottom:0;display:flex;align-items:end;gap:4px;font-size:clamp(42px,8vw,83px);filter:drop-shadow(0 4px 6px #000)}.promo-players span:nth-child(2){font-size:1.18em}.promo-callout{position:absolute;z-index:2;right:10px;top:24px;padding:8px;background:rgba(0,0,0,.72);font-size:clamp(10px,1.8vw,18px);font-weight:1000;font-style:italic;transform:skew(-8deg);text-align:center}.promo-callout b{font-size:1.5em;color:#45ff00}
+.showcase-history{display:flex;align-items:center;justify-content:center;gap:22px;max-width:520px;margin:14px auto 20px;padding:13px;border:2px solid #4aff27;border-radius:40px;background:linear-gradient(90deg,#002a19,#005d34,#002819);box-shadow:0 0 15px rgba(60,255,35,.55);font-size:clamp(15px,2.4vw,23px)}.showcase-history span{font-size:27px}.showcase-history strong{letter-spacing:1px}
+.quick-title{text-align:center;margin:18px 0 10px}.quick-title span{display:inline-block;padding:7px 32px;border-radius:30px;background:linear-gradient(110deg,#ffdb00,#ffae00);color:#101010;font-size:17px;font-weight:1000;font-style:italic;box-shadow:0 0 12px rgba(255,200,0,.35)}.showcase-quick{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.showcase-quick .quick-access-card{min-width:0;min-height:78px;padding:10px 8px;gap:8px;border:2px solid rgba(255,255,255,.25);border-radius:16px;box-shadow:0 0 13px rgba(0,130,255,.25)}.showcase-quick .quick-icon{width:39px;height:39px;flex:0 0 39px;font-size:26px;background:transparent}.showcase-quick strong{font-size:clamp(8px,1.2vw,12px);white-space:nowrap}.showcase-quick small{font-size:clamp(7px,1vw,10px);white-space:nowrap}.showcase-quick b{font-size:26px;margin-left:auto}.quick-predictions{background:linear-gradient(135deg,#008c3d,#004523)!important;border-color:#16ff57!important}.quick-vip{background:linear-gradient(135deg,#8b16ef,#380078)!important;border-color:#c53cff!important}.quick-analysis{background:linear-gradient(135deg,#ff9e00,#a83a00)!important;border-color:#ffc400!important}.quick-mypicks{background:linear-gradient(135deg,#008dff,#002c91)!important;border-color:#14caff!important}
+.featured-wrap{padding:12px;border:2px solid #13baff;border-radius:20px;background:rgba(0,9,25,.8);box-shadow:0 0 16px rgba(0,157,255,.3)}.featured-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}.featured-heading h3{font-size:clamp(12px,2vw,19px);color:#ffe000;font-weight:1000;font-style:italic}.featured-heading button{border:1px solid #9cff00;border-radius:20px;padding:7px 12px;background:#0b2b16;color:#fff;font-size:10px;font-weight:900;white-space:nowrap}.featured-match{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;padding:12px;margin-bottom:7px;border:1px solid rgba(0,191,255,.35);border-radius:11px;background:linear-gradient(100deg,#071b35,#061225)}.featured-match-top{grid-column:1/-1;display:flex;justify-content:space-between;gap:8px;margin:0;color:#a8d6ff;font-size:9px}.featured-match-teams{font-size:clamp(10px,1.5vw,14px);gap:8px}.featured-match-teams b{font-size:13px;color:#ffe000}.featured-match button{width:auto;margin:0;padding:9px 13px;border-radius:25px;background:linear-gradient(90deg,#00a94d,#006d31);border:1px solid #35ff5d;color:white;white-space:nowrap}.showcase-footer{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:16px 0 0;padding:10px 0;border-top:1px solid #ffcf00;border-bottom:1px solid #0aaaff}.showcase-footer .dashboard-feature{padding:8px 3px;background:transparent;border:0;border-right:1px solid rgba(255,200,0,.6);border-radius:0}.showcase-footer .dashboard-feature span{font-size:20px}.showcase-footer .dashboard-feature strong{font-size:clamp(7px,1vw,10px);color:#ffdf00;margin-top:4px}.showcase-tagline{text-align:center;margin:12px 0;padding:13px;border-radius:30px;background:linear-gradient(100deg,#4dff00,#b5ff00);color:#061c08;font-weight:1000;font-size:clamp(11px,1.7vw,17px);font-style:italic}.connection-status{text-align:center;color:#9bb8d8;font-size:9px;margin-top:10px}
+@media(max-width:600px){main{padding:9px 9px 20px}.showcase-brand{gap:7px;min-height:88px;padding:9px 7px}.showcase-ball{font-size:42px}.showcase-trophy{font-size:42px}.showcase-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.showcase-stats .stat-card{min-height:91px;padding:9px}.showcase-stats .stat-number{font-size:27px}.showcase-stats .stat-label{font-size:9px}.showcase-stats .stat-hint{font-size:8px}.stat-symbol{font-size:29px}.showcase-promo{min-height:132px;padding:12px}.promo-copy{max-width:66%}.promo-players{right:11%;font-size:45px}.promo-callout{right:5px;top:12px;font-size:9px}.showcase-quick{grid-template-columns:repeat(2,minmax(0,1fr))}.showcase-quick .quick-access-card{min-height:70px}.showcase-footer{grid-template-columns:repeat(2,minmax(0,1fr))}.featured-match{grid-template-columns:1fr}.featured-match-top{grid-column:1}.featured-match button{width:100%}}
+@media(min-width:900px){.showcase-promo{min-height:190px}.showcase-quick .quick-access-card{min-height:88px}}
+
 </style>
+
+<style id="compact-layout-larger-type">
+/* Compact dashboard footprint with stronger, easier-to-read typography */
+.showcase-brand{min-height:78px!important;padding:7px 9px!important;gap:8px!important}
+.showcase-ball{font-size:46px!important}.showcase-trophy{font-size:48px!important}
+.showcase-general{font-size:clamp(22px,4vw,35px)!important}
+.showcase-football{font-size:clamp(22px,4.2vw,37px)!important}
+.showcase-name p{font-size:clamp(9px,1.35vw,12px)!important;margin-top:4px!important}
+.showcase-stats{gap:7px!important;margin:8px 0!important}
+.showcase-stats .stat-card{min-height:78px!important;padding:8px 9px!important;gap:7px!important;border-radius:13px!important}
+.stat-symbol{font-size:clamp(25px,3vw,34px)!important}
+.showcase-stats .stat-number{font-size:clamp(26px,3.2vw,36px)!important}
+.showcase-stats .stat-label{font-size:clamp(10px,1.15vw,13px)!important;line-height:1.15!important;white-space:normal!important}
+.showcase-stats .stat-hint{font-size:clamp(9px,1vw,11px)!important;margin-top:3px!important;white-space:normal!important}
+.stat-arrow{width:22px!important;height:22px!important;flex-basis:22px!important;font-size:23px!important}
+.showcase-promo{min-height:112px!important;padding:10px 12px!important;margin:8px 0!important;border-radius:15px!important}
+.promo-copy span{font-size:clamp(18px,2.8vw,26px)!important}
+.promo-copy strong{font-size:clamp(27px,4.2vw,43px)!important}
+.promo-copy em{font-size:clamp(11px,1.6vw,15px)!important;margin-top:4px!important}
+.promo-players{font-size:clamp(39px,7vw,68px)!important}
+.promo-callout{font-size:clamp(11px,1.6vw,16px)!important;padding:5px!important;top:12px!important}
+.showcase-history{margin:8px auto 12px!important;padding:9px!important;gap:14px!important;font-size:clamp(17px,2.2vw,22px)!important}
+.showcase-history span{font-size:23px!important}
+.quick-title{margin:10px 0 7px!important}.quick-title span{padding:5px 25px!important;font-size:19px!important}
+.showcase-quick{gap:7px!important}
+.showcase-quick .quick-access-card{min-height:61px!important;padding:7px 8px!important;gap:6px!important;border-radius:12px!important}
+.showcase-quick .quick-icon{width:32px!important;height:32px!important;flex-basis:32px!important;font-size:25px!important}
+.showcase-quick strong{font-size:clamp(11px,1.2vw,14px)!important}
+.showcase-quick small{font-size:clamp(10px,1vw,12px)!important}
+.showcase-quick b{font-size:23px!important}
+.featured-wrap{padding:8px!important;border-radius:15px!important}
+.featured-heading{margin-bottom:7px!important}.featured-heading h3{font-size:clamp(15px,2vw,20px)!important}
+.featured-heading button{font-size:12px!important;padding:5px 9px!important}
+.featured-match{padding:8px!important;margin-bottom:5px!important;gap:6px!important}
+.featured-match-top{font-size:11px!important}
+.featured-match-teams{font-size:clamp(12px,1.5vw,15px)!important;gap:6px!important}
+.featured-match-teams b{font-size:15px!important}
+.featured-match button{font-size:12px!important;padding:7px 10px!important}
+.showcase-footer{margin-top:10px!important;padding:6px 0!important}
+.showcase-footer .dashboard-feature{padding:5px 2px!important}
+.showcase-footer .dashboard-feature span{font-size:19px!important}
+.showcase-footer .dashboard-feature strong{font-size:clamp(10px,1vw,12px)!important}
+.showcase-tagline{margin:8px 0!important;padding:9px!important;font-size:clamp(13px,1.7vw,17px)!important}
+@media(max-width:600px){
+ main{padding:6px 7px 14px!important}
+ .showcase-brand{min-height:70px!important;padding:6px!important}
+ .showcase-ball,.showcase-trophy{font-size:36px!important}
+ .showcase-general{font-size:clamp(19px,5vw,25px)!important}
+ .showcase-football{font-size:clamp(19px,5.1vw,26px)!important}
+ .showcase-name p{font-size:9px!important;letter-spacing:.4px!important}
+ .showcase-stats{gap:6px!important;margin:7px 0!important}
+ .showcase-stats .stat-card{min-height:72px!important;padding:7px!important;gap:6px!important}
+ .showcase-stats .stat-number{font-size:29px!important}
+ .showcase-stats .stat-label{font-size:11px!important}
+ .showcase-stats .stat-hint{font-size:10px!important}
+ .stat-symbol{font-size:26px!important}
+ .showcase-promo{min-height:105px!important;padding:9px!important}
+ .promo-copy{max-width:68%!important}
+ .promo-copy span{font-size:18px!important}.promo-copy strong{font-size:27px!important}.promo-copy em{font-size:11px!important}
+ .promo-players{right:10%!important;font-size:39px!important}
+ .promo-callout{font-size:10px!important;right:4px!important;top:8px!important}
+ .showcase-history{margin:7px auto 10px!important;padding:8px!important;font-size:17px!important}
+ .quick-title{margin:9px 0 6px!important}.quick-title span{font-size:18px!important}
+ .showcase-quick{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important}
+ .showcase-quick .quick-access-card{min-height:58px!important;padding:6px!important}
+ .showcase-quick strong{font-size:12px!important}.showcase-quick small{font-size:10px!important}
+ .featured-match{padding:7px!important;gap:5px!important}
+ .featured-match-top{font-size:11px!important}
+ .featured-match-teams{font-size:13px!important}
+ .featured-match button{font-size:12px!important}
+ .showcase-footer{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+}
+</style>
+
 </head>
 
 <body>
@@ -948,45 +1042,67 @@ header{
  </div>
 </header>
 
+<div id="firebaseNotificationCard" style="display:none;">
+  <button
+    id="enableFirebaseNotifications"
+    class="firebase-notification-btn">
+    🔔 Enable notification for updates
+  </button>
+
+  <button
+    id="disableFirebaseNotifications"
+    class="firebase-notification-btn"
+    style="display:none;">
+    Notifications enabled · Turn off
+  </button>
+
+  <div id="firebaseNotificationStatus" aria-live="polite">
+    Notifications are currently disabled.
+  </div>
+</div>
+
 <main>
 
 <section class="page active" id="home">
- <h2 class="page-title">Dashboard</h2>
- <p class="page-subtitle">Your football prediction overview.</p>
 
- <div class="stats-grid">
-  <button class="stat-card" onclick="showPage('predictions')">
-   <span class="stat-label">PREDICTIONS</span>
-   <div class="stat-number" id="predictionCount">0</div>
-   <span class="stat-hint">Available fixtures</span>
+
+ <div class="stats-grid showcase-stats">
+  <button class="stat-card stat-predictions" onclick="showPage('predictions')">
+   <span class="stat-symbol">▦</span><span class="stat-copy"><span class="stat-number" id="predictionCount">0</span><span class="stat-label">PREDICTIONS</span><span class="stat-hint">Available Matches</span></span><span class="stat-arrow">›</span>
   </button>
-
-  <button class="stat-card" onclick="showPage('vip')">
-   <span class="stat-label">VIP PREDICTIONS</span>
-   <div class="stat-number" id="vipCount">0</div>
-   <span class="stat-hint">Strong qualifying picks</span>
+  <button class="stat-card stat-vip" onclick="showPage('vip')">
+   <span class="stat-symbol">♛</span><span class="stat-copy"><span class="stat-number" id="vipCount">0</span><span class="stat-label">VIP PICKS</span><span class="stat-hint">Top Confidence</span></span><span class="stat-arrow">›</span>
   </button>
-
-  <button class="stat-card" onclick="showPage('history')">
-   <span class="stat-label">RECORDED PICKS</span>
-   <div class="stat-number" id="recordedCount">0</div>
-   <span class="stat-hint">Your saved predictions</span>
+  <button class="stat-card stat-recorded" onclick="showPage('history')">
+   <span class="stat-symbol">▣</span><span class="stat-copy"><span class="stat-number" id="recordedCount">0</span><span class="stat-label">RECORDED PICKS</span><span class="stat-hint">Your Selections</span></span><span class="stat-arrow">›</span>
   </button>
-
-  <button class="stat-card" onclick="showPage('history')">
-   <span class="stat-label">VERIFIED ACCURACY</span>
-   <div class="stat-number" id="accuracyCount">0%</div>
-   <span class="stat-hint">Settled saved picks</span>
+  <button class="stat-card stat-accuracy" onclick="showPage('history')">
+   <span class="stat-symbol">◎</span><span class="stat-copy"><span class="stat-number" id="accuracyCount">0%</span><span class="stat-label">VERIFIED ACCURACY</span><span class="stat-hint">Track Your Success</span></span><span class="stat-arrow">›</span>
   </button>
  </div>
 
- <button class="history-link" onclick="showPage('history')">
-  <span>VIEW HISTORY</span><span>→</span>
- </button>
+ <div class="showcase-promo">
+  <div class="promo-copy"><span>GET THE BEST</span><strong>FOOTBALL TIPS</strong><em>WITH HIGH CONFIDENCE ANALYSIS!</em></div>
+  <div class="promo-players" aria-hidden="true"><span>⚽</span><span>🏃🏿</span><span>🏃🏻</span></div>
+  <div class="promo-callout">ANALYSE<br>PREDICT<br><b>WIN</b></div>
+ </div>
 
- <div id="connectionStatus">Checking connection...</div>
+ <button class="history-link showcase-history" onclick="showPage('history')"><span>◴</span><strong>VIEW HISTORY</strong><span>›</span></button>
+
+ <div class="featured-wrap dashboard-section">
+  <div class="featured-heading"><h3>⭐ FEATURED MATCHES</h3><button onclick="showPage('predictions')">More Matches →</button></div>
+  <div id="featuredMatches"><div class="loading">Loading featured fixtures...</div></div>
+ </div>
+
+ <div class="dashboard-feature-strip showcase-footer">
+  <div class="dashboard-feature"><span>🛡️</span><strong>Trusted Analysis</strong></div>
+  <div class="dashboard-feature"><span>⚡</span><strong>High Accuracy</strong></div>
+  <div class="dashboard-feature"><span>🏆</span><strong>Expert Insights</strong></div>
+  <div class="dashboard-feature"><span>🤝</span><strong>Win Together</strong></div>
+ </div>
+ <div class="showcase-tagline">PLAY SMART. PREDICT BETTER. WIN MORE! ⚽</div>
+ <div id="connectionStatus" class="connection-status">Checking connection...</div>
 </section>
-
 <section class="page" id="predictions">
  <div class="section-heading">
   <div>
@@ -2874,77 +2990,51 @@ if('serviceWorker' in navigator){
 ===================================== -->
 
 <style>
+/* Compact update-notification control below the app title */
 #firebaseNotificationCard {
-  background: linear-gradient(145deg,#102b25,#0b1c24);
-  border: 1px solid #35ffad;
-  border-radius: 14px;
-  padding: 17px;
-  margin: 18px 0;
+  display: none;
+  width: fit-content;
+  max-width: 100%;
+  margin: 7px 10px 9px auto;
+  padding: 0;
   color: #fff;
-  box-shadow: 0 0 16px rgba(53,255,173,.10);
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  text-align: right;
 }
-
-#firebaseNotificationCard h3 {
-  margin: 0 0 8px;
-  color: #65ffc0;
-  font-size: 16px;
+#firebaseNotificationCard h3,
+#firebaseNotificationCard p,
+#firebaseNotificationStatus {
+  display: none !important;
 }
-
-#firebaseNotificationCard p {
-  color: #c5d6d0;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
 .firebase-notification-btn {
-  width: 100%;
-  padding: 13px;
-  margin-top: 8px;
-  border: none;
-  border-radius: 9px;
-  background: #35ffad;
-  color: #071426;
-  font-weight: 800;
+  width: auto;
+  min-height: 26px;
+  padding: 5px 9px;
+  margin: 0;
+  border: 1px solid rgba(53,255,173,.75);
+  border-radius: 7px;
+  background: rgba(53,255,173,.12);
+  color: #65ffc0;
+  font-size: 10px;
+  line-height: 1.2;
+  font-weight: 750;
+  letter-spacing: .15px;
   cursor: pointer;
 }
-
 .firebase-notification-btn:disabled {
   opacity: .5;
   cursor: not-allowed;
 }
-
-#firebaseNotificationStatus {
-  font-size: 12px;
-  margin-top: 10px;
-  color: #65ffc0;
+#disableFirebaseNotifications {
+  background: rgba(255,255,255,.07) !important;
+  color: #d7e7e1 !important;
+  border-color: rgba(255,255,255,.2) !important;
 }
 </style>
 
-<div id="firebaseNotificationCard" style="display:none;">
-  <h3>🔔 APP UPDATE NOTIFICATIONS</h3>
 
-  <p>
-    Enable notifications to receive important GENERAL FOOTBALL
-    TIPS updates and announcements.
-  </p>
-
-  <button
-    id="enableFirebaseNotifications"
-    class="firebase-notification-btn">
-    ENABLE NOTIFICATIONS
-  </button>
-
-  <button
-    id="disableFirebaseNotifications"
-    class="firebase-notification-btn"
-    style="background:#263d38;color:#fff;display:none;">
-    DISABLE NOTIFICATIONS
-  </button>
-
-  <div id="firebaseNotificationStatus">
-    Notifications are currently disabled.
-  </div>
-</div>
 
 <script type="module">
 
@@ -3003,8 +3093,8 @@ function showStatus(message) {
 }
 
 function updateButtons(enabled) {
-  enableButton.style.display = enabled ? "none" : "block";
-  disableButton.style.display = enabled ? "block" : "none";
+  enableButton.style.display = enabled ? "none" : "inline-flex";
+  disableButton.style.display = enabled ? "inline-flex" : "none";
 }
 
 /* SHOW NOTIFICATION CARD ON HOMEPAGE */
